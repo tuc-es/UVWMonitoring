@@ -1,0 +1,6 @@
+APs: a b c
+
+G (a -> X ((!a) U !b))
+G ((c & X ! a) -> X X (a R b))
+G ((!b & c) -> X (a R b))
+

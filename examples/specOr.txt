@@ -1,0 +1,3 @@
+APs: x y z a
+
+G ( x -> X (y | z | a))

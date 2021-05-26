@@ -1,0 +1,4 @@
+APs: x y z
+
+G F x
+G ( x -> X y )

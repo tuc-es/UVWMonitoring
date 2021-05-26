@@ -1,0 +1,3 @@
+[submodule "lib/Spot"]
+	path = lib/Spot
+	url = https://github.com/Meijuh/Spot
