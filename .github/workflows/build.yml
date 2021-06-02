@@ -37,7 +37,7 @@ jobs:
       run: pip3 install dd
     - name: Install qmake
       run: sudo apt-get install qt5-qmake qt5-default
-    - name: Compile ltltoplish tool
+    - name: Compile the ltltopolish tool
       run: cd src/ltltopolish; qmake Tool.pro; make
     - name: Test monitor generation
       run: python3 src/monitorcompiler/monitorcompiler.py examples/specTrafficLight.txt --liveness --outFile demos/TrafficLightsL010RB/Src/monitor.c
