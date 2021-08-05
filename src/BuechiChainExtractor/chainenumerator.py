@@ -280,7 +280,6 @@ def readHOA(sourceStream):
                     # Acceptance Condition
                     acc = set([])
                 else:
-                    print("Acc:", postPart)
                     assert postPart[0] == "{"
                     assert postPart[-1] == "}"
                     postPart = postPart[1:len(postPart) - 1]
@@ -523,10 +522,19 @@ def enumerateChains(tgba):
 def tryRandomFormulas():
 
     # Random formula generator
+    def formulaGenerator():
+        seedValue= 11
+        while True:
+            formulaProcess = subprocess.Popen("../../lib/spot/bin/randltl -n1000 --seed="+str(seedValue)+" a b c", shell=True,
+                                              stdout=subprocess.PIPE)
+            for line in formulaProcess.stdout.readlines():
+                thisFormula = line.decode("utf-8").strip()
+                yield thisFormula
+            assert formulaProcess.wait()==0
+            seedValue += 1
+
     nofFormulasSoFar = 0
-    formulaProcess = subprocess.Popen("../../lib/spot/bin/randltl -n80000000 --seed=10 a b c",shell=True,stdout=subprocess.PIPE)
-    for line in formulaProcess.stdout.readlines():
-        thisFormula = line.decode("utf-8").strip()
+    for thisFormula in formulaGenerator():
         nofFormulasSoFar += 1
 
         translationCmd = "../../lib/spot/bin/ltl2tgba -Ht -f \""+thisFormula+"\""
