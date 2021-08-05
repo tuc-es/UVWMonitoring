@@ -12,6 +12,7 @@
 #
 import sys, pysat, pysat.solvers, copy
 import automata.fa.nfa, automata.fa.dfa
+import subprocess, io, re
 
 # =================================================================
 # Helper Functions
@@ -109,19 +110,25 @@ def parseTransitionLabel(inputString, pos):
 
     def parseDisjunction(tokens, pos):
         (rest, pos) = parseConjunction(tokens, pos)
-        if (pos < len(tokens)) and tokens[pos] == "|":
+        parts = [rest]
+        while (pos < len(tokens)) and tokens[pos] == "|":
             (rest2, pos) = parseConjunction(tokens, pos + 1)
-            return ("|", rest, rest2), pos
+            parts.append(rest2)
+        if len(parts)>1:
+            return ("|", *parts), pos
         else:
             return rest, pos
 
     def parseConjunction(tokens, pos):
         (rest, pos) = parseNegation(tokens, pos)
-        if (pos < len(tokens)) and tokens[pos] == "&":
+        parts = [rest]
+        while (pos < len(tokens)) and tokens[pos] == "&":
             (rest2, pos) = parseNegation(tokens, pos + 1)
-            return (("&", rest, rest2), pos)
+            parts.append(rest2)
+        if len(parts) > 1:
+            return ("&", *parts), pos
         else:
-            return (rest, pos)
+            return rest, pos
 
     def parseNegation(tokens, pos):
         if tokens[pos] == "!":
@@ -141,6 +148,7 @@ def parseTransitionLabel(inputString, pos):
 
     (result, pos2) = parseDisjunction(tokens, 0)
     if pos2 != len(tokens):
+        print("TRANSERROR",result,pos2,tokens)
         raise Exception("Not all tokens in conditions needed")
     if inputString[pos] != "]":
         raise Exception("Condition does not end with a ']' properly")
@@ -184,50 +192,55 @@ def readHOA(sourceStream):
                 if not tgba.propositions is None:
                     raise Exception("Error: Multiple sets of APs given.")
                 restLine = line[4:]
-                assert restLine.find(" ") != -1
-                partA = restLine[0:restLine.find(" ")]
-                partB = restLine[restLine.find(" "):].strip()
-                nofAPs = int(partA)
-                # Poor man's direct parser
-                current = None
                 allAPs = []
-                escaped = False
-                for character in partB:
-                    if escaped:
-                        if current is None:
-                            raise Exception("Can't escape outside of AP: '" + partB + "'")
-                        current += character
-                        escaped = False
-                    elif character == "\\":
-                        escaped = True
-                    elif character in " \t":
-                        if not current is None:
-                            current += " "
-                    elif character == "\"":
-                        if current is None:
-                            current = ""
+                if restLine.find(" ") != -1:
+                    partA = restLine[0:restLine.find(" ")]
+                    partB = restLine[restLine.find(" "):].strip()
+                    nofAPs = int(partA)
+                    # Poor man's direct parser
+                    current = None
+                    escaped = False
+                    for character in partB:
+                        if escaped:
+                            if current is None:
+                                raise Exception("Can't escape outside of AP: '" + partB + "'")
+                            current += character
+                            escaped = False
+                        elif character == "\\":
+                            escaped = True
+                        elif character in " \t":
+                            if not current is None:
+                                current += " "
+                        elif character == "\"":
+                            if current is None:
+                                current = ""
+                            else:
+                                allAPs.append(current)
+                                current = None
                         else:
-                            allAPs.append(current)
-                            current = None
-                    else:
-                        if current is None:
-                            raise Exception("Unquoted character in: '" + partB + "'")
-                        current += character
-                if escaped:
-                    raise Exception("Escaping not terminated")
-                if not current is None:
-                    raise Exception("String not terminated")
-                if len(allAPs) != nofAPs:
-                    raise Exception("Nof declared APs is illegal: '" + line + "'")
+                            if current is None:
+                                raise Exception("Unquoted character in: '" + partB + "'")
+                            current += character
+                    if escaped:
+                        raise Exception("Escaping not terminated")
+                    if not current is None:
+                        raise Exception("String not terminated")
+                    if len(allAPs) != nofAPs:
+                        raise Exception("Nof declared APs is illegal: '" + line + "'")
                 tgba.propositions = allAPs
             elif line.startswith("Acceptance: "):
                 assert tgba.nofBuchiConditions is None
-                parts = line.split(" ")
-                nofAcceptanceElements = int(parts[1])
-                # Only supports TGBA!
-                for i in range(0, nofAcceptanceElements):
-                    assert parts[2 + i] == "Inf(" + str(i) + ")"
-                tgba.nofBuchiConditions = nofAcceptanceElements
+                if line.strip()=="Acceptance: 0 t":
+                    tgba.nofBuchiConditions = 0
+                else:
+                    parts = re.split('\ |\&', line)
+                    # parts = line.split(" &")
+                    print("PARTS:",parts)
+                    nofAcceptanceElements = int(parts[1])
+                    # Only supports TGBA!
+                    for i in range(0, nofAcceptanceElements):
+                        assert parts[2 + i] == "Inf(" + str(i) + ")"
+                    tgba.nofBuchiConditions = nofAcceptanceElements
             elif line.startswith("acc-name:"):
                 pass  # Ignored.
             elif line.startswith("properties:"):
@@ -271,7 +284,7 @@ def readHOA(sourceStream):
                     assert postPart[0] == "{"
                     assert postPart[-1] == "}"
                     postPart = postPart[1:len(postPart) - 1]
-                    conditions = postPart.split(",")
+                    conditions = postPart.split(" ")
                     acc = set([int(a) for a in conditions])
                 tgba.transitions[currentState].append((transitionLabel, toState, acc))
 
@@ -387,7 +400,9 @@ def enumerateChains(tgba):
     # Sanity check: We need to have exactly one Buchi state rejecting everything, as otherwise
     # the automaton is not minimized *or* has a universal safety hull.
     if len(rejectsAllStates)!=1:
-        raise Exception("Error: To enumerate all chains, we need that there is exactly one state in the Buchi automaton that rejects all suffix words.")
+        # Ok, no chains in this case
+        return []
+        # raise Exception("Error: To enumerate all chains, we need that there is exactly one state in the Buchi automaton that rejects all suffix words.")
 
 
     # Build a NFA for the set of words leading to the "rejectsAll" state.
@@ -423,52 +438,62 @@ def enumerateChains(tgba):
 
     def buildNFAForStrictSubsequence():
         newStates = nonOverlappingUnion(nfa.states,{"cpy"+b for b in nfa.states})
-        newStates.add("initNonOverlapping")
         newTransitions = {**copy.deepcopy(nfa.transitions), **{"cpy" + a:{c : {"cpy" + d for d in e} for (c, e) in b.items()} for (a, b) in nfa.transitions.items()}}
         newFinalStates = {"cpy" + str(a) for a in nfa.final_states}
 
-        # Obtain transitions from initial state
-        newTransitions["initNonOverlapping"] = {b : set([]) for b in nfa.input_symbols}
-        for (b,c) in nfa.transitions[nfa.initial_state].items():
-            for d in c:
-                if d in nfa.final_states:
-                    newFinalStates.add("initNonOverlapping")
-                for b2 in nfa.input_symbols:
-                    newTransitions["initNonOverlapping"][b2].update(newTransitions["cpy"+d][b2])
-            newTransitions["initNonOverlapping"][b].update(c)
-
         # Obtain other transitions
         for startingState in nfa.states:
-            for (b,c) in nfa.transitions[startingState].items():
-                for d in c:
-                    for b2 in nfa.input_symbols:
-                        newTransitions[startingState][b2].update(newTransitions["cpy"+d][b2])
+            for b in nfa.input_symbols:
+                newTransitions[startingState][b].add("cpy"+startingState)
 
         return automata.fa.nfa.NFA(
             states=newStates,
             input_symbols = nfa.input_symbols,
             transitions = newTransitions,
-            initial_state = "initNonOverlapping",
+            initial_state = nfa.initial_state,
             final_states = newFinalStates)
 
     nfa2 = buildNFAForStrictSubsequence()
-    print(NFAToHumanReadable(nfa))
-    print("And now the result:")
-    print(NFAToHumanReadable(nfa2))
-    nfa.show_diagram("/tmp/originalNFA.png")
-    nfa2.show_diagram("/tmp/modifiedNFA.png")
-
-    dfa_original = automata.fa.dfa.DFA.from_nfa(nfa)
-    dfa_original.minify()
+    nfa2.remove_states_with_empty_language()
+    nfa2.remove_unreachable_states()
     dfa_shorter = automata.fa.dfa.DFA.from_nfa(nfa2)
     dfa_shorter.minify()
-    dfa_original.show_diagram("/tmp/original.png")
-    print("Original DFA:")
-    print(NFAToHumanReadable(dfa_original))
-    print("Modified DFA:")
-    print(NFAToHumanReadable(dfa_shorter))
+    dfa_complement = dfa_shorter.complement()
+    nfa3 = automata.fa.nfa.NFA.from_dfa(dfa_complement)
+    shortestWordsNFA = nfa3.intersection(nfa)
+    shortestWordsNFA.remove_unreachable_states()
+    shortestWordsNFA.remove_states_with_empty_language()
+    # nfa.show_diagram("/tmp/ofig.png")
+    # shortestWordsNFA.show_diagram("/tmp/shortestWords.png")
+    # nfa3.show_diagram("/tmp/nfa3.png")
 
-    dfa_shorter.show_diagram("/tmp/shorter.png")
+    # Check if there are infinitely many different words in the language
+    def areThereAreInfinitelyManyWordsInTheNFA(givenNFA : automata.fa.nfa.NFA):
+        for startingState in givenNFA.final_states:
+            todo = set([startingState])
+            done = set([])
+            while len(todo)>0:
+                currentState = todo.pop()
+                for (c,p) in givenNFA.transitions[currentState].items():
+                    for nstate in p:
+                        if nstate==startingState:
+                            return True
+                        if not nstate in done:
+                            todo.add(nstate)
+                            done.add(nstate)
+        return False
+
+
+    assert not areThereAreInfinitelyManyWordsInTheNFA(shortestWordsNFA)
+
+    return True
+
+
+
+
+
+
+
 
     chainLength = 1
 
@@ -491,6 +516,31 @@ def enumerateChains(tgba):
 
 
 
+
+# =====================================================
+# Try to find a formula where there are infinitely many different shortest words
+# =====================================================
+def tryRandomFormulas():
+
+    # Random formula generator
+    nofFormulasSoFar = 0
+    formulaProcess = subprocess.Popen("../../lib/spot/bin/randltl -n80000000 --seed=10 a b c",shell=True,stdout=subprocess.PIPE)
+    for line in formulaProcess.stdout.readlines():
+        thisFormula = line.decode("utf-8").strip()
+        nofFormulasSoFar += 1
+
+        translationCmd = "../../lib/spot/bin/ltl2tgba -Ht -f \""+thisFormula+"\""
+        translationProcess = subprocess.Popen(translationCmd ,shell=True,stdout=subprocess.PIPE)
+        automaton = "".join([a.decode("utf-8") for a in translationProcess.stdout.readlines()])
+        print("----\n"+automaton)
+        buchiAutomaton = readHOA(io.StringIO(automaton))
+        buchiAutomaton.computeTransitionsPerCharacter()
+
+        res = enumerateChains(buchiAutomaton)
+        if res is True:
+            print("********************GOOD!*********************** "+str(nofFormulasSoFar))
+
+
 # =================================================================
 # Main functions
 # =================================================================
@@ -498,10 +548,13 @@ if __name__ == "__main__":
 
     # Parse parametersjhgh
     doRunTests = False
+    tryRandom = False
     inputStream = sys.stdin
     for arg in sys.argv[1:]:
         if arg == "--tests":
             doRunTests = True
+        elif arg == "--random":
+            tryRandom = True
         elif arg == "--help":
             print("""
 chaineumerator.py - Enumerates an UVW representing simple chains that are all accepted by a given transition-based Buchi automaton in HOA format, as produced by SPOT's ltl2tgba tool.
@@ -530,6 +583,8 @@ Parameters:
     # Execute program
     if doRunTests:
         runTests()
+    elif tryRandom:
+        tryRandomFormulas()
     else:
 
         # Read input automaton
@@ -541,7 +596,7 @@ Parameters:
         enumerateChains(buchiAutomaton)
 
         # Run console
-        if True:
+        if False:
             # noinspection PyUnresolvedReferences
             import code, readline
 
