@@ -13,10 +13,14 @@
 import sys, pysat, pysat.solvers, copy
 import automata.fa.nfa, automata.fa.dfa
 import subprocess, io, re
+import pareto_enumerator
 
 # =================================================================
 # Helper Functions
 # =================================================================
+from networkx.algorithms import shortest_paths
+
+
 def NFAToHumanReadable(nfa: automata.fa.nfa.NFA):
     result = "NFA(\n"
     result += "  states = "+str(nfa.states)+",\n"
@@ -462,9 +466,11 @@ def enumerateChains(tgba):
     shortestWordsNFA = nfa3.intersection(nfa)
     shortestWordsNFA.remove_unreachable_states()
     shortestWordsNFA.remove_states_with_empty_language()
+    shortestWordsDFA = automata.fa.dfa.DFA.from_nfa(shortestWordsNFA)
     # nfa.show_diagram("/tmp/ofig.png")
     # shortestWordsNFA.show_diagram("/tmp/shortestWords.png")
     # nfa3.show_diagram("/tmp/nfa3.png")
+    dfaRejectingSuffixes = automata.fa.dfa.DFA.from_nfa(nfa)
 
     # Check if there are infinitely many different words in the language
     def areThereAreInfinitelyManyWordsInTheNFA(givenNFA : automata.fa.nfa.NFA):
@@ -482,39 +488,183 @@ def enumerateChains(tgba):
                             done.add(nstate)
         return False
 
-
     assert not areThereAreInfinitelyManyWordsInTheNFA(shortestWordsNFA)
 
-    return True
+    # Ok, now compute the lengths of the chains in the nfa
+    def computeLengthsOfTheChains():
+        lengthsChains = set([])
+        todo = set([(shortestWordsNFA.initial_state,0)])
+        done = set(todo)
+
+        if shortestWordsNFA.initial_state in shortestWordsNFA.final_states:
+            lengthsChains.add(0)
+
+        while len(todo)>0:
+            (thisState,thisLen) = todo.pop()
+            for (c, p) in shortestWordsNFA.transitions[thisState].items():
+                for destState in p:
+                    (ts,tl) = (destState,thisLen+1)
+                    if not (ts,tl) in done:
+                        todo.add((ts,tl))
+                        done.add((ts,tl))
+                    if ts in shortestWordsNFA.final_states:
+                        lengthsChains.add(tl)
+        return lengthsChains
+
+    lengthsOfChains = computeLengthsOfTheChains()
+    print("***LEN CHAINS: "+str(lengthsOfChains))
 
 
+    # Enumerate chains using the Pareto Front enumeration library
+    paretoFrontAll = []
+    for chainLength in lengthsOfChains:
 
+        # Oracle function
+        # Format of the input: First the bits for the letters of the transitions between states,
+        # then the self-loop labels
+        # the last element is always the rejecting one. Here, it has a TRUE self-loop so that
+        # it does not have to be modeled
+        def oracle(point):
 
+            # Check if all the words leading here are OK --> they must all be shortest words
+            possibilities = [[shortestWordsDFA.initial_state]]
+            for i in range(chainLength):
+                nextPossibilities = set([])
+                for s in possibilities[i]:
+                    for j,a in enumerate(shortestWordsDFA.input_symbols):
+                        if point[i*len(shortestWordsDFA.input_symbols)+j]==0:
+                            nextPossibilities.add(shortestWordsDFA.transitions[s][a])
+                possibilities.append(list(nextPossibilities))
 
+            for a in possibilities[-1]:
+                if not a in shortestWordsDFA.final_states:
+                    return False
 
+            # Check which states are reachable for the whole chain
+            possibilities = [[dfaRejectingSuffixes.initial_state]]
+            for i in range(chainLength):
+                nextPossibilities = set([])
 
+                # Self-looping
+                todo = set(possibilities[i])
+                done = set(possibilities[i])
 
-    chainLength = 1
+                while len(todo)!=0:
+                    nextOne = todo.pop()
+                    for j,a in enumerate(dfaRejectingSuffixes.input_symbols):
+                        if point[(chainLength+i)*len(dfaRejectingSuffixes.input_symbols)+j]==0:
+                            succState = dfaRejectingSuffixes.transitions[nextOne][a]
+                            if not succState in done:
+                                todo.add(succState)
+                                done.add(succState)
 
-    # Allocate base Vars
-    nofVarsSoFar = 0
-    varsChainLabels = []
-    for i in range(chainLength*2-1):
-        varsChainLabels.append([range(nofVarsSoFar,nofVarsSoFar+(1 << len(tgba.propositions)))])
-        nofVarsSoFar += 1 << len(tgba.propositions)
-    varsReachableTGBAStates = []
-    for i in range(0,chainLength):
-        varsReachableTGBAStates.append([range(nofVarsSoFar, nofVarsSoFar + len(tgba.states))])
-        nofVarsSoFar += len(tgba.states)
+                # Transition to next element
+                for s in done:
+                    for j,a in enumerate(dfaRejectingSuffixes.input_symbols):
+                        if point[i*len(dfaRejectingSuffixes.input_symbols)+j]==0:
+                            nextPossibilities.add(dfaRejectingSuffixes.transitions[s][a])
+                possibilities.append(list(nextPossibilities))
 
-    # Constraints: 2. Reachability relation is closed under transitions
-    # -- however, no superfluous marked states are allowed
-    for chainPos in range(0,chainLength):
-        pass
+            for a in possibilities[-1]:
+                if not a in dfaRejectingSuffixes.final_states:
+                    return False
 
+            # Chain OK? Fine!
+            return True
 
+        paretoFrontPart = pareto_enumerator.computeParetoFront(oracle,
+            [(0, 2) for i in range(0,len(shortestWordsNFA.input_symbols)*2*chainLength)])
 
+        paretoFrontAll.extend(paretoFrontPart)
+        print("***FRONT: ",paretoFrontPart)
 
+    # Remove Pareto Front elements that reject a strict subset of other elements
+    # Iterate over the chains that may be dominated by another chain
+    indexParetoFrontElementToPotentiallyRemove = 0
+    while indexParetoFrontElementToPotentiallyRemove < len(paretoFrontAll):
+
+        # The reference chain is the one to potentially remove
+        chainReference = paretoFrontAll[indexParetoFrontElementToPotentiallyRemove]
+        chainLengthReference = len(chainReference)//len(shortestWordsNFA.input_symbols)//2
+
+        # Iterate over the potentially dominating chains - the "contestant" chain
+        for chainNumContestant in range(0,len(paretoFrontAll)):
+            if indexParetoFrontElementToPotentiallyRemove!=chainNumContestant:
+
+                # If there is no possibilities for the ChainToPotentiallyRemove to be in the final state
+                # while the chainToCheckAgainst is not, then remove the Pareto front element to potentially remove
+                chainContestant = paretoFrontAll[chainNumContestant]
+                chainLengthContestant = len(chainContestant) // len(shortestWordsNFA.input_symbols) // 2
+
+                # Which combinations of states are reachable?
+                todo = set([(0,frozenset([0]))])
+                done = set([(0,frozenset([0]))])
+                while len(todo)!=0:
+                    (sRef,sContestant) = todo.pop()
+                    for k, s in enumerate(dfaRejectingSuffixes.input_symbols):
+                        # Compute next states of the contestant chain
+                        contestantStates = set([])
+                        for fromState in sContestant:
+                            # Rejecting?
+                            if fromState==chainContestant:
+                                contestantStates.add(fromState)
+                            else:
+                                # Self-loop
+                                # print("X",chainLengthContestant,fromState,k,file=sys.stderr)
+                                if (fromState==chainLengthContestant) or (chainContestant[(chainLengthContestant + fromState) * len(dfaRejectingSuffixes.input_symbols) + k] == 0):
+                                    contestantStates.add(fromState)
+                                # Transition
+                                if (fromState<chainLengthContestant) and (chainContestant[(fromState) * len(dfaRejectingSuffixes.input_symbols) + k] == 0):
+                                    contestantStates.add(fromState + 1)
+
+                        # Self-loop in the reference chain?
+                        # print("X",chainLengthReference,sRef,k,file=sys.stderr)
+                        if (sRef==chainLengthReference) or (chainReference[(chainLengthReference + sRef) * len(dfaRejectingSuffixes.input_symbols) + k] == 0):
+                            nextElement = (sRef,frozenset(contestantStates))
+                            if not nextElement in done:
+                                todo.add(nextElement)
+                                done.add(nextElement)
+                        # Transition
+                        if sRef < chainLengthReference:
+                            if chainReference[(sRef) * len(dfaRejectingSuffixes.input_symbols) + k] == 0:
+                                nextElement = (sRef+1,frozenset(contestantStates))
+                                if not nextElement in done:
+                                    todo.add(nextElement)
+                                    done.add(nextElement)
+
+                # Check if the reference chain is dominated by the contestant chain
+                isDominated = True
+                for (sRef,sContestant) in todo:
+                    if sRef==chainLengthReference:
+                        # Check that the contestant is in an initial state
+                        if not chainLengthContestant in sContestant:
+                            isDominated = False
+
+                # Remove domainated chain
+                if isDominated:
+                    paretoFrontAll.pop(indexParetoFrontElementToPotentiallyRemove)
+                    indexParetoFrontElementToPotentiallyRemove -= 1
+                    break
+
+        # Continue inspecting the elements
+        indexParetoFrontElementToPotentiallyRemove += 1
+
+    def chainListToDOT(outFile):
+        # Visualize the ccmplete Pareto front
+        print("digraph chains {",file=outFile)
+        for i,chain in enumerate(paretoFrontAll):
+            chainLength = len(chain) // len(dfaRejectingSuffixes.input_symbols) // 2
+            for j in range(0,chainLength+1):
+                print( "node"+str(i)+"x"+str(j)+";",file=outFile)
+            for j in range(0,chainLength):
+                for k,s in enumerate(dfaRejectingSuffixes.input_symbols):
+                    if chain[(chainLength+j)*len(dfaRejectingSuffixes.input_symbols)+k]==0:
+                        print("node" + str(i) + "x" + str(j) + " -> node" + str(i) + "x" + str(j)+" [label=\""+str(s)+"\"];",file=outFile)
+                    if chain[(j) * len(dfaRejectingSuffixes.input_symbols) + k] == 0:
+                        print("node" + str(i) + "x" + str(j) + " -> node" + str(i) + "x" + str(j+1)+" [label=\""+str(s)+"\"];",file=outFile)
+        print("}",file=outFile)
+
+    chainListToDOT(open("/tmp/chains.dot","w"))
 
 # =====================================================
 # Try to find a formula where there are infinitely many different shortest words
