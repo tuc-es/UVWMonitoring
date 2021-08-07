@@ -467,7 +467,8 @@ def enumerateChains(tgba):
     shortestWordsNFA.remove_unreachable_states()
     shortestWordsNFA.remove_states_with_empty_language()
     shortestWordsDFA = automata.fa.dfa.DFA.from_nfa(shortestWordsNFA)
-    # nfa.show_diagram("/tmp/ofig.png")
+    # nfa.show_diagram("/tmp/orifN")
+    nfa.show_diagram("/tmp/orig.png")
     shortestWordsNFA.show_diagram("/tmp/shortestWords.png")
     # nfa3.show_diagram("/tmp/nfa3.png")
     dfaRejectingSuffixes = automata.fa.dfa.DFA.from_nfa(nfa)
@@ -601,89 +602,97 @@ def enumerateChains(tgba):
     # Remove Pareto Front elements that reject a strict subset of other elements
     # Iterate over the chains that may be dominated by another chain
     if True:
-        indexParetoFrontElementToPotentiallyRemove = 0
+        chainListToDOT(open("/tmp/preOpt.dot", "w"))
+        indexParetoFrontElementToPotentiallyRemove = len(paretoFrontAll)-1
         round = 0
-        while indexParetoFrontElementToPotentiallyRemove < len(paretoFrontAll):
+        while indexParetoFrontElementToPotentiallyRemove >= 0:
 
             # The reference chain is the one to potentially remove
             chainReference = paretoFrontAll[indexParetoFrontElementToPotentiallyRemove]
             chainLengthReference = len(chainReference)//len(shortestWordsNFA.input_symbols)//2
 
+            round += 1
+            chainListToDOT(open("/tmp/round"+str(round)+".dot","w"))
+            print("Round ",round," move ",indexParetoFrontElementToPotentiallyRemove)
+
+            # If there is no possibilities for the ChainToPotentiallyRemove to be in the final state
+            # while the chainToCheckAgainst is not, then remove the Pareto front element to potentially remove
             # Iterate over the potentially dominating chains - the "contestant" chain
-            for chainNumContestant in range(0,len(paretoFrontAll)):
-                if indexParetoFrontElementToPotentiallyRemove!=chainNumContestant:
+            todo = set([(0, frozenset([(a,0) for a in range(0,len(paretoFrontAll)) if a != indexParetoFrontElementToPotentiallyRemove]))])
+            done = set(todo)
 
-                    round += 1
-                    chainListToDOT(open("/tmp/round"+str(round)+".dot","w"))
-                    print("Round ",round," move ",indexParetoFrontElementToPotentiallyRemove,"into",chainNumContestant)
+            while len(todo) != 0:
+                (sRef, sContestant) = todo.pop()
 
-                    # If there is no possibilities for the ChainToPotentiallyRemove to be in the final state
-                    # while the chainToCheckAgainst is not, then remove the Pareto front element to potentially remove
-                    chainContestant = paretoFrontAll[chainNumContestant]
-                    chainLengthContestant = len(chainContestant) // len(shortestWordsNFA.input_symbols) // 2
+                # Which combinations of states are reachable?
+                for k, s in enumerate(dfaRejectingSuffixes.input_symbols):
+                    # Compute next states of the contestant chain
+                    contestantStates = set([])
 
-                    # Which combinations of states are reachable?
-                    todo = set([(0,frozenset([0]))])
-                    done = set([(0,frozenset([0]))])
-                    while len(todo)!=0:
-                        (sRef,sContestant) = todo.pop()
-                        for k, s in enumerate(dfaRejectingSuffixes.input_symbols):
-                            # Compute next states of the contestant chain
-                            contestantStates = set([])
-                            for fromState in sContestant:
-                                # Rejecting?
-                                if fromState==chainContestant:
-                                    contestantStates.add(fromState)
-                                else:
-                                    # Self-loop
-                                    # print("X",chainLengthContestant,fromState,k,file=sys.stderr)
-                                    if (fromState==chainLengthContestant) or (chainContestant[(chainLengthContestant + fromState) * len(dfaRejectingSuffixes.input_symbols) + k] == 0):
-                                        contestantStates.add(fromState)
-                                    # Transition
-                                    if (fromState<chainLengthContestant) and (chainContestant[(fromState) * len(dfaRejectingSuffixes.input_symbols) + k] == 0):
-                                        contestantStates.add(fromState + 1)
+                    for (fromChain,fromState) in sContestant:
 
-                            # Self-loop in the reference chain?
-                            # print("X",chainLengthReference,sRef,k,file=sys.stderr)
-                            if (sRef==chainLengthReference) or (chainReference[(chainLengthReference + sRef) * len(dfaRejectingSuffixes.input_symbols) + k] == 0):
-                                nextElement = (sRef,frozenset(contestantStates))
-                                if not nextElement in done:
-                                    todo.add(nextElement)
-                                    done.add(nextElement)
-                                    print("By Self-Loop:",sRef,k,contestantStates)
+                        chainContestant = paretoFrontAll[fromChain]
+                        chainLengthContestant = len(chainContestant) // len(shortestWordsNFA.input_symbols) // 2
+
+                        # Rejecting?
+                        if fromState==chainLengthContestant:
+                            contestantStates.add((fromChain,fromState))
+                        else:
+                            # Self-loop
+                            # print("X",chainLengthContestant,fromState,k,file=sys.stderr)
+                            if (fromState==chainLengthContestant) or (chainContestant[(chainLengthContestant + fromState) * len(dfaRejectingSuffixes.input_symbols) + k] == 0):
+                                contestantStates.add((fromChain,fromState))
                             # Transition
-                            if sRef < chainLengthReference:
-                                if chainReference[(sRef) * len(dfaRejectingSuffixes.input_symbols) + k] == 0:
-                                    nextElement = (sRef+1,frozenset(contestantStates))
-                                    if not nextElement in done:
-                                        todo.add(nextElement)
-                                        done.add(nextElement)
-                                        print("By Transition:", sRef+1, k, contestantStates)
+                            if (fromState<chainLengthContestant) and (chainContestant[fromState * len(dfaRejectingSuffixes.input_symbols) + k] == 0):
+                                contestantStates.add((fromChain,fromState + 1))
+
+                    # Self-loop in the reference chain?
+                    # print("X",chainLengthReference,sRef,k,file=sys.stderr)
+                    if (sRef==chainLengthReference) or (chainReference[(chainLengthReference + sRef) * len(dfaRejectingSuffixes.input_symbols) + k] == 0):
+                        nextElement = (sRef,frozenset(contestantStates))
+                        if not nextElement in done:
+                            todo.add(nextElement)
+                            done.add(nextElement)
+                            print("By Self-Loop:",sRef,k,contestantStates)
+                    # Transition
+                    if sRef < chainLengthReference:
+                        if chainReference[(sRef) * len(dfaRejectingSuffixes.input_symbols) + k] == 0:
+                            nextElement = (sRef+1,frozenset(contestantStates))
+                            if not nextElement in done:
+                                todo.add(nextElement)
+                                done.add(nextElement)
+                                print("By Transition:", sRef+1, k, contestantStates)
 
                     print("Reachable in round",round,":",done)
 
-                    # Check if the reference chain is dominated by the contestant chain
-                    isDominated = True
-                    for (sRef,sContestant) in done:
-                        if sRef==chainLengthReference:
-                            # print("Check: ",sRef,sContestant)
-                            # Check that the contestant is in an initial state
-                            if not chainLengthContestant in sContestant:
-                                # print("AYP!")
-                                isDominated = False
+            # Check if the reference chain is dominated by the contestant chain
+            isDominated = True
+            for (sRef,sContestant) in done:
+                print("UCHECK:",sRef,sContestant)
+                if sRef==chainLengthReference:
+                    # print("Check: ",sRef,sContestant)
+                    # Check that the contestant is in an initial state
+                    dominatedThisOne = False
+                    for chainNumContestant in range(0, len(paretoFrontAll)):
+                        chainContestant = paretoFrontAll[chainNumContestant]
+                        chainLengthContestant = len(chainContestant) // len(shortestWordsNFA.input_symbols) // 2
+                        if (chainNumContestant,chainLengthContestant) in sContestant:
+                            # print("AYP!")
+                            dominatedThisOne = True
+                    if not dominatedThisOne:
+                        isDominated = False
 
-                    # Remove dominated chain
-                    if isDominated:
-                        paretoFrontAll.pop(indexParetoFrontElementToPotentiallyRemove)
-                        indexParetoFrontElementToPotentiallyRemove -= 1
-                        break
+            # Remove dominated chain
+            if isDominated:
+                paretoFrontAll.pop(indexParetoFrontElementToPotentiallyRemove)
 
             # Continue inspecting the elements
-            indexParetoFrontElementToPotentiallyRemove += 1
+            indexParetoFrontElementToPotentiallyRemove -= 1
 
     chainListToDOT(open("/tmp/chains.dot","w"))
 
     print("*** Nof final chains: "+str(len(paretoFrontAll)))
+    print("Order of APs:",list(tgba.propositions))
     if len(paretoFrontAll)>1:
         assert False # Testing 1-2-3
 
