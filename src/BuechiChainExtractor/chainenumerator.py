@@ -664,7 +664,7 @@ def enumerateChains(tgba):
 
     # Remove Pareto Front elements that reject a strict subset of other elements
     # Iterate over the chains that may be dominated by another chain
-    if True:
+    for myIteration in [1]:
         chainListToDOT(open("/tmp/preOpt.dot", "w"))
         indexParetoFrontElementToPotentiallyRemove = len(paretoFrontAll)-1
         round = 0
@@ -675,14 +675,15 @@ def enumerateChains(tgba):
             chainLengthReference = len(chainReference)//len(shortestWordsNFA.input_symbols)//2
 
             round += 1
-            chainListToDOT(open("/tmp/round"+str(round)+".dot","w"))
-            print("Round ",round," move ",indexParetoFrontElementToPotentiallyRemove)
+            # chainListToDOT(open("/tmp/round"+str(round)+".dot","w"))
+            # print("Round ",round," move ",indexParetoFrontElementToPotentiallyRemove)
 
             # If there is no possibilities for the ChainToPotentiallyRemove to be in the final state
             # while the chainToCheckAgainst is not, then remove the Pareto front element to potentially remove
             # Iterate over the potentially dominating chains - the "contestant" chain
             todo = set([(0, frozenset([(a,0) for a in range(0,len(paretoFrontAll)) if a != indexParetoFrontElementToPotentiallyRemove]))])
             done = set(todo)
+            traceBack = {(0, frozenset([(a,0) for a in range(0,len(paretoFrontAll)) if a != indexParetoFrontElementToPotentiallyRemove])) : []}
 
             while len(todo) != 0:
                 (sRef, sContestant) = todo.pop()
@@ -716,7 +717,8 @@ def enumerateChains(tgba):
                         if not nextElement in done:
                             todo.add(nextElement)
                             done.add(nextElement)
-                            print("By Self-Loop:",sRef,k,contestantStates)
+                            traceBack[nextElement] = traceBack[(sRef, sContestant)]+[s]
+                            # print("By Self-Loop:",sRef,k,contestantStates)
                     # Transition
                     if sRef < chainLengthReference:
                         if chainReference[(sRef) * len(dfaRejectingSuffixes.input_symbols) + k] == 0:
@@ -724,14 +726,16 @@ def enumerateChains(tgba):
                             if not nextElement in done:
                                 todo.add(nextElement)
                                 done.add(nextElement)
-                                print("By Transition:", sRef+1, k, contestantStates)
+                                traceBack[nextElement] = traceBack[(sRef, sContestant)] + [s]
+                                # print("By Transition:", sRef+1, k, contestantStates)
 
-                    print("Reachable in round",round,":",done)
+                    # print("Reachable in round",round,":",done)
 
             # Check if the reference chain is dominated by the contestant chain
             isDominated = True
+            nonDominatedPath = None
             for (sRef,sContestant) in done:
-                print("UCHECK:",sRef,sContestant)
+                # print("UCHECK:",sRef,sContestant)
                 if sRef==chainLengthReference:
                     # print("Check: ",sRef,sContestant)
                     # Check that the contestant is in an initial state
@@ -744,20 +748,23 @@ def enumerateChains(tgba):
                             dominatedThisOne = True
                     if not dominatedThisOne:
                         isDominated = False
+                        nonDominatedPath = traceBack[(sRef, sContestant)]
 
             # Remove dominated chain
             if isDominated:
                 paretoFrontAll.pop(indexParetoFrontElementToPotentiallyRemove)
+            else:
+                print("Chain",indexParetoFrontElementToPotentiallyRemove," not dominated because of path ",nonDominatedPath)
 
             # Continue inspecting the elements
             indexParetoFrontElementToPotentiallyRemove -= 1
 
-    chainListToDOT(open("/tmp/chains.dot","w"))
+    # chainListToDOT(open("/tmp/chains.dot","w"))
 
     print("*** Nof final chains: "+str(len(paretoFrontAll)))
-    print("Order of APs:",list(tgba.propositions))
-    if len(paretoFrontAll)>1:
-        assert False # Testing 1-2-3
+    # print("Order of APs:",list(tgba.propositions))
+    # if len(paretoFrontAll)>1:
+    #     assert False # Testing 1-2-3
 
 # =====================================================
 # Try to find a formula where there are infinitely many different shortest words
