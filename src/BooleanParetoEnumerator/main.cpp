@@ -197,7 +197,7 @@ int main(int nofArgs, char **args) {
 
             } else if (thisLine=="N") {
                 // Not good. Remove
-                ruleOutCurrentSolutionAndDominatedPoints();
+                ruleOutCurrentSolutionAndDominatingPoints();
             } else {
                 std::cerr << "Error: Illegal read line: '" << thisLine << "'\n";
                 return 1;

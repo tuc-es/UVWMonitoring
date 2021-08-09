@@ -13,12 +13,11 @@
 import sys, pysat, pysat.solvers, copy
 import automata.fa.nfa, automata.fa.dfa
 import subprocess, io, re
-import pareto_enumerator
 
 # =================================================================
 # Helper Functions
 # =================================================================
-from networkx.algorithms import shortest_paths
+basePathScript = sys.argv[0][0:sys.argv[0].rfind("/")]
 
 
 def NFAToHumanReadable(nfa: automata.fa.nfa.NFA):
@@ -43,9 +42,15 @@ def nonOverlappingUnion(setA,setB):
 def doesParsedFormulaAcceptPropositionAssignment(transitionLabel,character):
     if isinstance(transitionLabel,tuple):
         if transitionLabel[0]=="|":
-            return doesParsedFormulaAcceptPropositionAssignment(transitionLabel[1],character) | doesParsedFormulaAcceptPropositionAssignment(transitionLabel[2],character)
+            result = False
+            for a in transitionLabel[1:]:
+                result = result | doesParsedFormulaAcceptPropositionAssignment(a,character)
+            return result
         elif transitionLabel[0]=="&":
-            return doesParsedFormulaAcceptPropositionAssignment(transitionLabel[1],character) & doesParsedFormulaAcceptPropositionAssignment(transitionLabel[2],character)
+            result = True
+            for a in transitionLabel[1:]:
+                result = result & doesParsedFormulaAcceptPropositionAssignment(a,character)
+            return result
         elif transitionLabel[0]=="!":
             return not doesParsedFormulaAcceptPropositionAssignment(transitionLabel[1],character)
         else:
@@ -54,7 +59,8 @@ def doesParsedFormulaAcceptPropositionAssignment(transitionLabel,character):
         if transitionLabel=="t":
             return True
         bitNum = int(transitionLabel)
-        return (character & (1<<bitNum))>0
+        result = (character & (1<<bitNum))>0
+        return result
 
 
 class TGBA:
@@ -78,6 +84,15 @@ class TGBA:
                         theseTransitions.add((toState,frozenset(acc)))
                 self.transitionsPerCharacter[sourceState].append(theseTransitions)
 
+    def __str__(self):
+        return "TGBA("+\
+            "\n  propositions = "+str(self.propositions)+\
+            "\n  states = "+str(self.states)+\
+            "\n  initialStates = "+str(self.initialStates)+\
+            "\n  name = "+str(self.name)+\
+            "\n  nofBuchiConditions = "+str(self.nofBuchiConditions)+\
+            "\n  transitions = "+str(self.transitions)+\
+            "\n  transitionsPerCharacter = "+str(self.transitionsPerCharacter)+"\n)"
 
 # =================================================================
 # Parsing HOA
@@ -381,6 +396,8 @@ def runTests():
 # =================================================================
 def enumerateChains(tgba):
 
+    print("TGBA:",tgba)
+
     # Search for Buchi automaton states rejecting everything
     rejectsAllStates = []
 
@@ -402,10 +419,12 @@ def enumerateChains(tgba):
 
     # Sanity check: We need to have exactly one Buchi state rejecting everything, as otherwise
     # the automaton is not minimized *or* has a universal safety hull.
-    if len(rejectsAllStates)!=1:
+    if len(rejectsAllStates)<1:
         # Ok, no chains in this case
         return []
-        # raise Exception("Error: To enumerate all chains, we need that there is exactly one state in the Buchi automaton that rejects all suffix words.")
+
+    if len(rejectsAllStates)>1:
+        raise Exception("Error: To enumerate all chains, we need that there is exactly one state in the Buchi automaton that rejects all suffix words.")
 
 
     # Build a NFA for the set of words leading to the "rejectsAll" state.
@@ -435,6 +454,8 @@ def enumerateChains(tgba):
         initial_state='init',
         final_states={'q'+str(rejectsAllStates[0])}
     )
+    print("Order propositions:",tgba.propositions)
+    nfa.show_diagram("/tmp/orig.png")
 
     # Subtract from the NFA those words that have a strict subsequence as accepting
     # for this, (1) build an NFA for this language, and then (2) combining it with the existing NFA.
@@ -468,7 +489,6 @@ def enumerateChains(tgba):
     shortestWordsNFA.remove_states_with_empty_language()
     shortestWordsDFA = automata.fa.dfa.DFA.from_nfa(shortestWordsNFA)
     # nfa.show_diagram("/tmp/orifN")
-    nfa.show_diagram("/tmp/orig.png")
     shortestWordsNFA.show_diagram("/tmp/shortestWords.png")
     # nfa3.show_diagram("/tmp/nfa3.png")
     dfaRejectingSuffixes = automata.fa.dfa.DFA.from_nfa(nfa)
@@ -575,12 +595,55 @@ def enumerateChains(tgba):
             # Chain OK? Fine!
             return True
 
-        paretoFrontPart = pareto_enumerator.computeParetoFront(oracle,
-            [(0, 1) for i in range(0,len(shortestWordsNFA.input_symbols)*2*chainLength)])
+        pathToEnumerator = basePathScript+"/../BooleanParetoEnumerator/enumerator"
+        enumeratorProcess = subprocess.Popen(pathToEnumerator,stdout=subprocess.PIPE,stdin=subprocess.PIPE)
+        with open("/tmp/enumeratorTest.txt","wb") as debugOutFile:
+
+            # Init
+            enumeratorProcess.stdin.write(("INIT "+str(len(shortestWordsNFA.input_symbols)*2*chainLength)+"\nSTART\n").encode("utf-8"))
+            debugOutFile.write(("INIT "+str(len(shortestWordsNFA.input_symbols)*2*chainLength)+"\nSTART\n").encode("utf-8"))
+            enumeratorProcess.stdin.flush()
+
+            # Get Queries
+            paretoFrontPart = []
+            while True:
+                nextLine = enumeratorProcess.stdout.readline().decode("utf-8").strip()
+                if nextLine.startswith("SOLUTION"):
+                    break
+                nextPoint = []
+                for a in nextLine:
+                    if a=="1":
+                        nextPoint.append(1)
+                    elif a=="0":
+                        nextPoint.append(0)
+                    else:
+                        raise Exception("Unknown pareto query: "+nextLine)
+                thisOne = oracle(nextPoint)
+                if thisOne:
+                    enumeratorProcess.stdin.write("Y\n".encode("utf-8"))
+                    debugOutFile.write("Y\n".encode("utf-8"))
+                else:
+                    enumeratorProcess.stdin.write("N\n".encode("utf-8"))
+                    debugOutFile.write("N\n".encode("utf-8"))
+                enumeratorProcess.stdin.flush()
+
+            # Enumerate Pareto front parts
+            while True:
+                nextLine = enumeratorProcess.stdout.readline().decode("utf-8").strip()
+                if nextLine.startswith("END"):
+                    break
+                nextPoint = []
+                for a in nextLine:
+                    if a == "1":
+                        nextPoint.append(1)
+                    elif a == "0":
+                        nextPoint.append(0)
+                    else:
+                        raise Exception("Unknown pareto query: " + nextLine)
+                paretoFrontPart.append(nextPoint)
 
         paretoFrontAll.extend(paretoFrontPart)
         print("***FRONT: ",paretoFrontPart)
-
 
     # Dotting function
     def chainListToDOT(outFile):
