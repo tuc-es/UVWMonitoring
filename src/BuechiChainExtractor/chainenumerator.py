@@ -404,14 +404,26 @@ def enumerateChains(tgba):
     for stateNum in range(len(tgba.states)):
 
         # Rejects everything?
-        rejectsEverything = True
-        for character in range(1 << len(tgba.propositions)):
-            for rejCondition in range(tgba.nofBuchiConditions):
+        # Special case in the HOA format: Safety automaton
+        # Because in the HOA format, there needs to be an infinite run for a word to be accepted we have to treat this
+        # case differently.
+        if tgba.nofBuchiConditions==0:
+            rejectsEverything = True
+            for character in range(1 << len(tgba.propositions)):
                 foundThisOne = False
                 for toState,acc in tgba.transitionsPerCharacter[stateNum][character]:
-                    if rejCondition in acc and toState==stateNum:
+                    if toState==stateNum:
                         foundThisOne = True
                 rejectsEverything = rejectsEverything and foundThisOne
+        else:
+            rejectsEverything = True
+            for character in range(1 << len(tgba.propositions)):
+                for rejCondition in range(tgba.nofBuchiConditions):
+                    foundThisOne = False
+                    for toState,acc in tgba.transitionsPerCharacter[stateNum][character]:
+                        if rejCondition in acc and toState==stateNum:
+                            foundThisOne = True
+                    rejectsEverything = rejectsEverything and foundThisOne
 
         if rejectsEverything:
             rejectsAllStates.append(stateNum)
@@ -424,7 +436,7 @@ def enumerateChains(tgba):
         return []
 
     if len(rejectsAllStates)>1:
-        raise Exception("Error: To enumerate all chains, we need that there is exactly one state in the Buchi automaton that rejects all suffix words.")
+        raise Exception("Error: To enumerate all chains, we need that there is exactly one state in the Buchi automaton that rejects all suffix words, but here we have the states "+str(rejectsAllStates))
 
 
     # Build a NFA for the set of words leading to the "rejectsAll" state.
@@ -600,8 +612,52 @@ def enumerateChains(tgba):
         with open("/tmp/enumeratorTest.txt","wb") as debugOutFile:
 
             # Init
-            enumeratorProcess.stdin.write(("INIT "+str(len(shortestWordsNFA.input_symbols)*2*chainLength)+"\nSTART\n").encode("utf-8"))
-            debugOutFile.write(("INIT "+str(len(shortestWordsNFA.input_symbols)*2*chainLength)+"\nSTART\n").encode("utf-8"))
+            enumeratorProcess.stdin.write(("INIT "+str(len(shortestWordsNFA.input_symbols)*2*chainLength)+"\n").encode("utf-8"))
+            debugOutFile.write(("INIT "+str(len(shortestWordsNFA.input_symbols)*2*chainLength)+"\n").encode("utf-8"))
+
+            # Remove spurious chains: Transitions between chain elements always need to be possible!
+            for i in range(chainLength):
+                for j,a in enumerate(shortestWordsDFA.input_symbols):
+                    if j>0:
+                        enumeratorProcess.stdin.write(" ".encode("utf-8"))
+                        debugOutFile.write(" ".encode("utf-8"))
+                    enumeratorProcess.stdin.write(str(-1*i*len(shortestWordsDFA.input_symbols)-j-1).encode("utf-8"))
+                    debugOutFile.write(str(-1*i*len(shortestWordsDFA.input_symbols)-j-1).encode("utf-8"))
+                enumeratorProcess.stdin.write("\n".encode("utf-8"))
+                debugOutFile.write("\n".encode("utf-8"))
+
+            # Disallow prefixes of existing chains
+            for chain in paretoFrontAll:
+                chainLengthPrevious = len(chain) // len(dfaRejectingSuffixes.input_symbols) // 2
+                first = True
+                for j,a in enumerate(shortestWordsDFA.input_symbols):
+                    for chainPos in range(0,chainLengthPrevious):
+
+                        # Transition conditions
+                        if chain[chainPos*len(shortestWordsDFA.input_symbols)+j]>0:
+                            if not first:
+                                enumeratorProcess.stdin.write(" ".encode("utf-8"))
+                                debugOutFile.write(" ".encode("utf-8"))
+                            enumeratorProcess.stdin.write(str(-1*chainPos*len(shortestWordsDFA.input_symbols)-j-1).encode("utf-8"))
+                            debugOutFile.write(str(-1*chainPos*len(shortestWordsDFA.input_symbols)-j-1).encode("utf-8"))
+                            first = False
+
+                        # Self-loop
+                        if chain[(chainPos+chainLengthPrevious)*len(shortestWordsDFA.input_symbols)+j]>0:
+                            if not first:
+                                enumeratorProcess.stdin.write(" ".encode("utf-8"))
+                                debugOutFile.write(" ".encode("utf-8"))
+                            enumeratorProcess.stdin.write(str(-1*(chainPos+chainLengthPrevious)*len(shortestWordsDFA.input_symbols)-j-1).encode("utf-8"))
+                            debugOutFile.write(str(-1*(chainPos+chainLengthPrevious)*len(shortestWordsDFA.input_symbols)-j-1).encode("utf-8"))
+                            first = False
+
+                enumeratorProcess.stdin.write("\n".encode("utf-8"))
+                debugOutFile.write("\n".encode("utf-8"))
+
+            # Possible future optimization: The end of a chain must not be the same as for previous chains if the previous chain is self-looping on every character.
+
+            enumeratorProcess.stdin.write("START\n".encode("utf-8"))
+            debugOutFile.write("START\n".encode("utf-8"))
             enumeratorProcess.stdin.flush()
 
             # Get Queries
@@ -759,7 +815,7 @@ def enumerateChains(tgba):
             # Continue inspecting the elements
             indexParetoFrontElementToPotentiallyRemove -= 1
 
-    # chainListToDOT(open("/tmp/chains.dot","w"))
+    chainListToDOT(open("/tmp/chains.dot","w"))
 
     print("*** Nof final chains: "+str(len(paretoFrontAll)))
     # print("Order of APs:",list(tgba.propositions))
