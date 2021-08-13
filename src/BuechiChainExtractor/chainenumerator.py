@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 #
 # Enumerates an UVW representing simple chains that are all accepted by a given
-# transition-based Buchi automaton in HOA format, as produced by SPOT's ltl2tgba tool.
+# transition-based deterministic parity automaton in HOA format, as produced by SPOT's ltl2tgba tool.
 #
-# Example command to produce a transition-based generalized Buchi automaton
-# ./ltl2tgba -Ht -f "[] <> a"
+# Example command to produce a transition-based deterministic parity automaton
+# OLD: ./ltl2tgba -Ht -f "[] <> a"
+# ./ltl2tgba -D --parity="max even" -f "F(~a R ~b)" > example1.hoa2
+
 #
 # Requires an extended version of automata-lib. Can be installed with:
 #   pip3 uninstall automata-lib
@@ -69,7 +71,7 @@ class TGBA:
         self.states = []
         self.initialStates = []
         self.name = None
-        self.nofBuchiConditions = None
+        self.nofAcceptanceElements = None
         self.transitions = []
         self.transitionsPerCharacter = None # Filled by the "computeTransitionsPerCharacter" function
 
@@ -90,7 +92,7 @@ class TGBA:
             "\n  states = "+str(self.states)+\
             "\n  initialStates = "+str(self.initialStates)+\
             "\n  name = "+str(self.name)+\
-            "\n  nofBuchiConditions = "+str(self.nofBuchiConditions)+\
+            "\n  nofAcceptanceElements = "+str(self.nofAcceptanceElements)+\
             "\n  transitions = "+str(self.transitions)+\
             "\n  transitionsPerCharacter = "+str(self.transitionsPerCharacter)+"\n)"
 
@@ -183,6 +185,8 @@ def readHOA(sourceStream):
     assert firstLine.startswith("HOA: v1")
 
     # Read lines
+    acceptanceInfo = False
+    foundDeterministic = False
     readingMode = 0  # 0=headers, 1=body, 2=ended
     currentState = None
     nextLines = list(sourceStream.readlines())
@@ -248,22 +252,23 @@ def readHOA(sourceStream):
                         raise Exception("Nof declared APs is illegal: '" + line + "'")
                 tgba.propositions = allAPs
             elif line.startswith("Acceptance: "):
-                assert tgba.nofBuchiConditions is None
-                if line.strip()=="Acceptance: 0 t":
-                    tgba.nofBuchiConditions = 0
-                else:
-                    parts = re.split('\ |\&', line)
-                    # parts = line.split(" &")
-                    print("PARTS:",parts)
-                    nofAcceptanceElements = int(parts[1])
-                    # Only supports TGBA!
-                    for i in range(0, nofAcceptanceElements):
-                        assert parts[2 + i] == "Inf(" + str(i) + ")"
-                    tgba.nofBuchiConditions = nofAcceptanceElements
+                pass
             elif line.startswith("acc-name:"):
-                pass  # Ignored.
+                if line.startswith("acc-name: parity max even "):
+                    acceptanceInfo = True
+                    tgba.nofAcceptanceElements = int(line[26:].strip())
+                elif line.startswith("acc-name: Buchi"):
+                    acceptanceInfo = True
+                    tgba.nofAcceptanceElements = 1
+                elif line.startswith("acc-name: none"):
+                    acceptanceInfo = True
+                    tgba.nofAcceptanceElements = 0
+                else:
+                    raise Exception("Error reading input automaton file: the acceptance condition given in the 'acc-name' field is not suitable for this tool.")
             elif line.startswith("properties:"):
-                pass  # Ignored.
+                for prop in line.strip().split(" "):
+                    if prop=="deterministic":
+                        foundDeterministic = True
             elif line == "--BODY--":
                 readingMode = 1
             else:
@@ -311,6 +316,13 @@ def readHOA(sourceStream):
             pass
 
             # Read all lines. Done!
+    
+    # Sanity check
+    if not acceptanceInfo:
+        raise Exception("Error: This tool needs HOA input files that have an 'acc-name' element!")
+    if not foundDeterministic:
+        raise Exception("Error: This tool needs HOA input files that are augmented by the information that they are deterministic.")
+    
     return tgba
 
 
@@ -402,12 +414,12 @@ def enumerateChains(tgba):
     rejectsAllStates = []
 
     for stateNum in range(len(tgba.states)):
-
+    
         # Rejects everything?
         # Special case in the HOA format: Safety automaton
         # Because in the HOA format, there needs to be an infinite run for a word to be accepted we have to treat this
         # case differently.
-        if tgba.nofBuchiConditions==0:
+        if tgba.nofAcceptanceElements==0:
             rejectsEverything = True
             for character in range(1 << len(tgba.propositions)):
                 foundThisOne = False
@@ -418,12 +430,18 @@ def enumerateChains(tgba):
         else:
             rejectsEverything = True
             for character in range(1 << len(tgba.propositions)):
-                for rejCondition in range(tgba.nofBuchiConditions):
-                    foundThisOne = False
-                    for toState,acc in tgba.transitionsPerCharacter[stateNum][character]:
-                        if rejCondition in acc and toState==stateNum:
-                            foundThisOne = True
-                    rejectsEverything = rejectsEverything and foundThisOne
+                foundThisOne = False
+                rejectingLoop = False
+                for toState,acc in tgba.transitionsPerCharacter[stateNum][character]:
+                    assert len(acc)==1 or len(acc)==0
+                    if len(acc)==1:
+                        (color,) = acc
+                        if toState==stateNum:
+                            if (color%2)==0:
+                                foundThisOne = True
+                            else:
+                                rejectingLoop = True
+                rejectsEverything = rejectsEverything and foundThisOne and not rejectingLoop
 
         if rejectsEverything:
             rejectsAllStates.append(stateNum)
@@ -843,7 +861,7 @@ def tryRandomFormulas():
     for thisFormula in formulaGenerator():
         nofFormulasSoFar += 1
 
-        translationCmd = "../../lib/spot/bin/ltl2tgba -Ht -f \""+thisFormula+"\""
+        translationCmd = "../../lib/spot/bin/ltl2tgba -D --parity=\"max even\" -Ht -f \""+thisFormula+"\""
         translationProcess = subprocess.Popen(translationCmd ,shell=True,stdout=subprocess.PIPE)
         automaton = "".join([a.decode("utf-8") for a in translationProcess.stdout.readlines()])
         print("----\n"+automaton)

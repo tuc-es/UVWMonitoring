@@ -4,7 +4,7 @@
     "extra_flags": "-DSTM32L010xB",
     "f_cpu": "32000000L",
     "mcu": "stm32l010rbt6",
-    "product_line": "STM32L010xx"
+    "product_line": "STM32L010xB"
   },
   "debug": {
     "default_tools": [

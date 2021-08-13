@@ -18,7 +18,8 @@ def bddToDNF(bdd,mgr,careSet,bddVariables,propositions):
     bddLB = bdd & careSet
     bddUB = bdd | ~careSet
     while bddLB!=mgr.false:
-        # print("BDD:",bddLB.to_expr())
+        print("BDD:",bddLB.to_expr())
+        print("BDDUB:", bddUB.to_expr())
         
         # Find concrete assignment
         assignment = []
@@ -41,6 +42,9 @@ def bddToDNF(bdd,mgr,careSet,bddVariables,propositions):
         # Done!
         result.append(assignment)
         bddLB = bddLB & ~assignmentSoFar
+
+
+    print("RED:",result)
     return result
 
 def testBDDToCNF(ddMgr,propositions):
@@ -270,7 +274,452 @@ def bitListToCCodeNumber(case,invert):
     return (convertToCNum(mask),convertToCNum(val))
 
 
-def generateMonitorCode(dfa,baseUVW,propositions,livenessMonitoring,outFile):
+
+
+#============================================================================
+# Code Generation
+#============================================================================
+def generateMonitorCode(dfa,baseUVW,propositions,livenessMonitoring,outFile,generationAlgorithm):
+    if generationAlgorithm=="deterministic":
+        generateMonitorCodeDeterministic(dfa, baseUVW, propositions, livenessMonitoring, outFile)
+    elif generationAlgorithm=="nondeterministic":
+        generateMonitorCodeNondeterministic(dfa, baseUVW, propositions, livenessMonitoring, outFile)
+
+
+def pickCNFOrDNFWhateverIsShorter(cnfLabel,dnfLabel,outFile, varNames):
+    # Try DNF Conversion
+    textDNF = ""
+    if len(dnfLabel)==0:
+        textDNF = "0"
+    for i, case in enumerate(dnfLabel):
+        if i > 0:
+            textDNF += " || "
+        if not False in case and not True in case:
+            textDNF += "1"
+        else:
+            first = True
+            textDNF += "("
+            for j,element in enumerate(case):
+                if not element is None:
+                    if not first:
+                        textDNF += " && "
+                    first = False
+                    if element:
+                        textDNF += varNames[j]
+                    else:
+                        textDNF += "!"+varNames[j]
+            textDNF += ")"
+
+    # Try CNF Conversion
+    # print("// CNF LABEL: "+str(cnfLabel))
+    textCNF = ""
+    if len(cnfLabel) == 0:
+        textCNF = "1"
+    for i, case in enumerate(cnfLabel):
+        if i > 0:
+            textCNF += " && "
+        if not False in case and not True in case:
+            textCNF += "0"
+        else:
+            first = True
+            textCNF += "("
+            for j, element in enumerate(case):
+                if not element is None:
+                    if not first:
+                        textCNF += "||"
+                    first = False
+                    if element:
+                        textCNF += "!" + varNames[j]
+                    else:
+                        textCNF += varNames[j]
+            textCNF += ")"
+
+    # Choose between CNF and DNF
+    if len(textDNF) < len(textCNF):
+        print(textDNF, end="", file=outFile)
+    else:
+        print(textCNF, end="", file=outFile)
+
+
+def generateMonitorCodeNondeterministic(dfa,baseUVW,propositions,livenessMonitoring,outFile):
+
+    # Prepare BDD variables and their compiled names
+    allBDDVarNames = list(propositions)
+    bddVariables = [baseUVW.ddMgr.add_expr(a) for a in propositions]
+    for stateNum in range(len(baseUVW.stateNames)):
+        baseUVW.ddMgr.declare("uvwState" + str(stateNum))
+        bddVariables.append(baseUVW.ddMgr.add_expr("uvwState"+str(stateNum)))
+        allBDDVarNames.append("uvwState"+str(stateNum))
+
+    # Compute number of Bits for each state buffer - Recursively
+    bufferSizesInBits = [-1 for state in baseUVW.stateNames]
+    incomingTransitionsUVWExceptForSelfLoops = [[] for state in baseUVW.stateNames]
+    for s in range(len(baseUVW.stateNames)):
+        for (a, b) in baseUVW.transitions[s]:
+            if (a != s):
+                incomingTransitionsUVWExceptForSelfLoops[a].append((s, b))
+    nofBitsIncomingTransitions = []
+    for s in range(len(baseUVW.stateNames)):
+        # Count non-self-looping transitions
+        cnt = 0
+        for (a, b) in incomingTransitionsUVWExceptForSelfLoops[s]:
+            if (a != s):
+                cnt += 1
+        if cnt > 0:
+            nofBitsIncomingTransitions.append(math.ceil(math.log(cnt) / math.log(2)))
+        else:
+            nofBitsIncomingTransitions.append(0)
+
+    def recurseComputerBufferSizes(uvwState):
+        if bufferSizesInBits[uvwState] != -1:
+            return
+        maxBufferSize = 0
+        for (a, b) in incomingTransitionsUVWExceptForSelfLoops[uvwState]:
+            recurseComputerBufferSizes(a)
+            maxBufferSize = max(maxBufferSize,
+                                bufferSizesInBits[a] + len(propositions) + nofBitsIncomingTransitions[uvwState])
+        bufferSizesInBits[uvwState] = maxBufferSize
+
+    for s in range(len(baseUVW.stateNames)):
+        recurseComputerBufferSizes(s)
+
+    # Compute buffer sizes in #32-bit uints
+    bufferSizesInWords = [int(math.ceil(a / 32.0)) for a in bufferSizesInBits]
+
+    # print("Buffer sizes:",bufferSizesInBits)
+    # print(nofBitsIncomingTransitions)
+
+    # Sanity check -- at most 32 bits added per trace element
+    # (the sanity check fails slightly unnecessarily if there are no transitions in the UVW)
+    maxNofBitsTransitions = max(1, max([len(a) for a in incomingTransitionsUVWExceptForSelfLoops]))
+    assert math.ceil(math.log(maxNofBitsTransitions) / math.log(2)) + len(propositions) <= 32
+
+    # Declare variables in Monitor code
+    print("#include \"UVWMonitor.h\"", file=outFile)
+    print("#include <stdbool.h>", file=outFile)
+    print("/* Declare variables for monitoring */", file=outFile)
+
+    for uvwState in range(len(baseUVW.stateNames)):
+        if uvwState in baseUVW.initialStates:
+            print("bool uvwState" + str(uvwState) + " = 1;", file=outFile)
+        else:
+            print("bool uvwState"+str(uvwState)+" = 0;",file=outFile)
+
+    print("struct bufType {", file=outFile)
+    bufferVarNames = {}
+    initParts = []
+    for i, a in enumerate(bufferSizesInWords):
+        for j in range(a):
+            bufferVarNames[(i, j)] = "buf.b" + str(i) + "p" + str(j);
+            print("  uint32_t b" + str(i) + "p" + str(j) + ";", file=outFile)
+            initParts.append("0")
+    print("} buf = {" + ",".join(initParts) + "};", file=outFile)
+    for i, a in enumerate(bufferSizesInWords):
+        if bufferSizesInBits[i] == 0:
+            bufferVarNames[(i, 0)] = "b" + str(i) + "p" + str(0);
+            print("const uint32_t b" + str(i) + "p0 = 0;", file=outFile)
+    for i, a in enumerate(bufferSizesInWords):
+        if livenessMonitoring and baseUVW.rejecting[i] and i > 0:  # No counter for the FASLE
+            print("uint32_t cnt" + str(i) + " = 0;", file=outFile)
+
+    # Main monitoring function
+    print("\nvoid monitorUpdate(uint32_t apValues) {", file=outFile)
+
+    # Copy the bit values to individual variables
+    for i, a in enumerate(baseUVW.propositions):
+        print("  bool " + a + " = apValues & (1 << " + str(i) + ");", file=outFile)
+        print("  (void)("+a+"); // Avoid symbol ununsed warning.", file=outFile)
+    print("")
+
+    for stateNum in range(len(baseUVW.stateNames)):
+
+        # Enumerate all incoming transitions
+        incoming = baseUVW.ddMgr.false
+        for fromState in range(len(baseUVW.stateNames)):
+            for (toState,condition) in baseUVW.transitions[fromState]:
+                if toState==stateNum:
+                    incoming = incoming | bddVariables[len(propositions)+fromState] & condition
+        del fromState
+
+        # print("incoming: ",incoming.to_expr())
+
+        print("  bool nextUVW"+str(stateNum)+" = 0;",file=outFile)
+        print("  if (",file=outFile,end="")
+        careSet = baseUVW.ddMgr.true
+        # print(allBDDVarNames,"thiathia")
+        dnfLabel = bddToDNF(incoming, baseUVW.ddMgr, careSet, bddVariables, allBDDVarNames)
+        cnfLabel = bddToDNF(~incoming, baseUVW.ddMgr, careSet, bddVariables, allBDDVarNames)
+        pickCNFOrDNFWhateverIsShorter(cnfLabel, dnfLabel, outFile, allBDDVarNames)
+        print(") {",file=outFile)
+        print("    nextUVW" + str(stateNum) + " = 1;", file=outFile)
+
+        # Not already in the state or self-loop inactive?
+        print("    if (!uvwState"+str(stateNum)+" || (",file=outFile,end="")
+        # Enumerate all self-loops transitions
+        incoming = baseUVW.ddMgr.false
+        for (toState, condition) in baseUVW.transitions[stateNum]:
+            if toState == stateNum:
+                incoming = incoming | condition
+        dnfLabel = bddToDNF(~incoming, baseUVW.ddMgr, careSet, bddVariables, allBDDVarNames)
+        cnfLabel = bddToDNF(incoming, baseUVW.ddMgr, careSet, bddVariables, allBDDVarNames)
+        pickCNFOrDNFWhateverIsShorter(cnfLabel, dnfLabel, outFile, allBDDVarNames)
+        print(")) {", file = outFile)
+        print("      // Not previously here",file=outFile)
+        if livenessMonitoring:
+            if not (stateNum == 0) and baseUVW.rejecting[stateNum]:
+                print("      cnt" + str(stateNum) + "=1;",file=outFile)
+        first = True
+
+        # Incoming transitions - copy buffer information
+        for fromUVW in range(len(baseUVW.stateNames)):
+            for (toUVW,condition) in baseUVW.transitions[fromUVW]:
+                if toUVW==stateNum and fromUVW!=toUVW:
+                    print("      ",file=outFile,end="")
+                    if not first:
+                        print("else ", file=outFile, end="")
+                    first = False
+                    transitionCond = bddVariables[len(propositions)+fromUVW] & condition
+                    print("if (", file=outFile, end="")
+                    dnfLabel = bddToDNF(transitionCond, baseUVW.ddMgr, careSet, bddVariables, allBDDVarNames)
+                    cnfLabel = bddToDNF(~transitionCond, baseUVW.ddMgr, careSet, bddVariables, allBDDVarNames)
+                    pickCNFOrDNFWhateverIsShorter(cnfLabel, dnfLabel, outFile, allBDDVarNames)
+                    print(") {", file=outFile)
+
+                    print("Mux: ",baseUVW.transitions[fromUVW])
+                    indexIncomingTransition = -1
+                    for transitionIndex, (ls, ll) in enumerate(
+                            incomingTransitionsUVWExceptForSelfLoops[toUVW]):
+                        print("ENUM:",ls,ll,fromUVW,toUVW)
+                        if (ls, ll) == (fromUVW, condition):
+                            indexIncomingTransition = transitionIndex
+                    assert indexIncomingTransition != -1
+
+                    # Low bits
+                    for index in range(0, bufferSizesInBits[fromUVW] // 32):
+                        print("        " + bufferVarNames[(toUVW, index)] + " = " + bufferVarNames[
+                            (fromUVW, index)] + +";", file=outFile)
+                    # Cases
+                    if ((bufferSizesInBits[fromUVW] % 32) < (bufferSizesInBits[toUVW] % 32)):
+                        # Simple case: appending all to the same part
+                        wordIndex = bufferSizesInBits[toUVW] // 32
+                        # Copy part
+                        # TODO: This fails for large specs. Index computations do not seem to be correct.
+                        print("        " + bufferVarNames[(toUVW, wordIndex)] + " = " +
+                              bufferVarNames[(fromUVW, wordIndex)], end="", file=outFile)
+                        # Add proposition values
+                        print(" | (apValues << " + str(
+                            (bufferSizesInBits[toUVW] % 32) - nofBitsIncomingTransitions[
+                                toUVW] - len(propositions)) + ")", end="", file=outFile)
+
+                        # Add source
+                        if nofBitsIncomingTransitions[toUVW] > 0:
+                            print(" | (" + str(indexIncomingTransition) + " << " + str(
+                                (bufferSizesInBits[toUVW] % 32) - nofBitsIncomingTransitions[
+                                    toUVW]) + ")", end="", file=outFile)
+                        print(";", file=outFile)
+                    else:
+                        raise Exception("This case is currently unimplemented.")
+
+                    print("      }", file=outFile)
+
+        if stateNum==0:
+            print("      logViolationExplanation(0,&(buf.b0p0)," + str(bufferSizesInWords[0] * 4) + ");", file=outFile)
+
+        # Counter increase
+        if livenessMonitoring:
+            if not (stateNum == 0) and baseUVW.rejecting[stateNum]:
+                print("    } else {", file=outFile)
+                print("      cnt" + str(stateNum) + "++;",file=outFile)
+                print("      if ((cnt" + str(stateNum) + " & FREQUENCY_MASK_STARVATION_LOGGING)==0) {", file=outFile)
+                print("        logLivenessStarvation(" + str(stateNum) + ",cnt" + str(stateNum) + ", &buf.b" + str(
+                    stateNum) + "p0," + str(bufferSizesInWords[stateNum]) + ");", file=outFile)
+                print("      }", file=outFile)
+
+        print("    }", file=outFile)
+
+
+        print("  }", file=outFile)
+
+
+    for i, a in enumerate(baseUVW.stateNames):
+        print("  uvwState"+str(i) + " = nextUVW"+str(i)+";", file=outFile)
+    print("")
+    print("}\n", file=outFile)
+
+    if False:
+
+        print("  switch (currentState) {", file=outFile)
+        for s in range(len(dfa.states)):
+            if not s in dfa.accepting:
+                print("    case " + str(s) + ":", file=outFile)
+                print("      /* UVW states: " + " ".join(
+                    [str(i) for i in range(len(baseUVW.stateNames)) if dfa.states[s][i]]) + " */", file=outFile)
+                # Iterate over the transitions and perform transitions
+                careSet = baseUVW.ddMgr.true
+                for transNo, (toDFA, label, uvwTrans) in enumerate(dfa.transitions[s]):
+                    # Try CNF and DNF for the transition condition
+                    # print("Cond Label: ",label.to_expr())
+                    dnfLabel = bddToDNF(label, baseUVW.ddMgr, careSet, bddVariables, propositions)
+                    cnfLabel = bddToDNF(~label, baseUVW.ddMgr, careSet, bddVariables, propositions)
+                    careSet &= ~label
+                    if transNo == 0:
+                        print("      if (", end="", file=outFile)
+                    else:
+                        print("      } else if (", end="", file=outFile)
+
+
+                    print(") {", file=outFile)
+                    if (toDFA == s):
+                        print("        /* Stay in the same DFA state */", file=outFile)
+                    else:
+                        print("        currentState = " + str(toDFA) + ";", file=outFile)
+
+                    # Update buffers
+                    # -> Determine which parts are new.
+                    newStates = []
+                    fromWhere = []
+                    for uvwStateNum in range(0, len(baseUVW.stateNames)):
+
+                        # Only copy buffers if not safety violating *or* for buffer 0
+                        if (not toDFA in dfa.accepting) or (uvwStateNum == 0) or (not 0 in dfa.states[toDFA]):
+
+                            # Check if uvwStateNum is left along this transition -- then copying is necessary!
+                            stayInUVWState = False
+                            for uvwTransNo, (fromUVW, toUVW, label) in enumerate(uvwTrans):
+                                if (fromUVW == toUVW) and (toUVW == uvwStateNum):
+                                    stayInUVWState = True
+
+                            # Increase counter
+                            if stayInUVWState and dfa.states[toDFA][uvwStateNum] and livenessMonitoring and \
+                                    baseUVW.rejecting[uvwStateNum]:
+                                print("        cnt" + str(uvwStateNum) + "++;", file=outFile)
+
+                            # If state is newly entered copy buffer information
+                            if dfa.states[toDFA][uvwStateNum] and not stayInUVWState:
+                                # Ok, this one is new. Search for transition
+                                foundUVWTransition = False
+                                for uvwTransNo, (fromUVW, toUVW, label) in enumerate(uvwTrans):
+                                    if not foundUVWTransition:
+                                        if (toUVW == uvwStateNum):
+                                            foundUVWTransition = True
+                                            # Perform copy
+                                            indexIncomingTransition = -1
+                                            # print("NOF INCOMING: ",incomingTransitionsUVWExceptForSelfLoops[toUVW])
+                                            for transitionIndex, (ls, ll) in enumerate(
+                                                    incomingTransitionsUVWExceptForSelfLoops[toUVW]):
+                                                if (ls, ll) == (fromUVW, label):
+                                                    indexIncomingTransition = transitionIndex
+                                            assert indexIncomingTransition != -1
+
+                                            if livenessMonitoring and baseUVW.rejecting[toUVW] and not toUVW == 0:
+                                                print("        cnt" + str(toUVW) + " = 0;", file=outFile)
+
+                                            # Low bits
+                                            for index in range(0, bufferSizesInBits[toUVW] // 32 - bufferSizesInBits[
+                                                uvwStateNum] // 32):
+                                                print("        " + bufferVarNames[(toUVW, index)] + " = " + bufferVarNames[
+                                                    (fromUVW, index)] + +";", file=outFile)
+                                            # Cases
+                                            if ((bufferSizesInBits[fromUVW] % 32) < (bufferSizesInBits[toUVW] % 32)):
+                                                # Simple case: appending all to the same part
+                                                wordIndex = bufferSizesInBits[toUVW] // 32
+                                                # Copy part
+                                                # TODO: This fails for large specs. Index computations do not seem to be correct.
+                                                print("        " + bufferVarNames[(toUVW, wordIndex)] + " = " +
+                                                      bufferVarNames[(fromUVW, wordIndex)], end="", file=outFile)
+                                                # Add proposition values
+                                                print(" | (v << " + str(
+                                                    (bufferSizesInBits[toUVW] % 32) - nofBitsIncomingTransitions[
+                                                        toUVW] - len(propositions)) + ")", end="", file=outFile)
+
+                                                # Add source
+                                                if (nofBitsIncomingTransitions[toUVW] > 0):
+                                                    print(" | (" + str(indexIncomingTransition) + " << " + str(
+                                                        (bufferSizesInBits[toUVW] % 32) - nofBitsIncomingTransitions[
+                                                            toUVW]) + ")", end="", file=outFile)
+                                                print(";", file=outFile)
+                                            else:
+                                                raise Exception("This case is currently unimplemented.")
+                                assert foundUVWTransition
+
+                                # In case we do not have a violation, increase liveness counters
+                    if not toDFA in dfa.accepting and livenessMonitoring:
+
+                        # The liveness monitored states are numbered through so that a mask can be used
+                        posLivenessMonitoredValue = 0
+                        posLivenessMonitoredPos = 0
+
+                        # Check if we have a rejecting state
+                        for uvwStateNum in range(0, len(baseUVW.stateNames)):
+
+                            # Only copy buffers if not safety violating *or* for buffer 0
+                            if not (uvwStateNum == 0) and baseUVW.rejecting[uvwStateNum]:
+
+                                # Check if uvwStateNum is left along this transition -- then copying is necessary!
+                                stayInUVWState = False
+                                for uvwTransNo, (fromUVW, toUVW, label) in enumerate(uvwTrans):
+                                    if (fromUVW == toUVW) and (toUVW == uvwStateNum):
+                                        stayInUVWState = True
+                                if stayInUVWState:
+                                    posLivenessMonitoredValue += (1 << posLivenessMonitoredPos)
+                                posLivenessMonitoredPos += 1
+
+                        if posLivenessMonitoredValue > 0:
+                            print("        livenessMonitoring(" + str(posLivenessMonitoredValue) + ");", file=outFile)
+
+                    # In case we had a violation, log a violation
+                    if toDFA in dfa.accepting:
+                        # Log violation!
+                        # Case 1: Safety violation -- here, we use the fact that state 0 is always
+                        # the state rejecting everything in the UVW library
+                        if dfa.states[toDFA][0]:
+                            print("        logViolationExplanation(" + str(toDFA) + ",&(buf.b0p0)," + str(
+                                bufferSizesInWords[0] * 4) + ");", file=outFile)
+                        else:
+                            print("        logViolationExplanation(" + str(toDFA) + ",&buf,sizeof(buf));", file=outFile)
+
+                print("      }", file=outFile)
+                print("      break;", file=outFile)
+        print("    default:", file=outFile)
+        for s in range(len(dfa.states)):
+            if s in dfa.accepting:
+                print("      /* DFA State " + str(s) + " has UVW states: " + " ".join(
+                    [str(i) for i in range(len(baseUVW.stateNames)) if dfa.states[s][i]]) + " */", file=outFile)
+        print("      break;", file=outFile)
+
+
+    # Add decoding information for the buffers:
+    print("/* Decoding information for the buffers:", file=outFile)
+    print("   -------------------------------------\n", file=outFile)
+    for i in range(0, len(baseUVW.stateNames)):
+        print(" - UVW state " + str(i) + " with LTL subformula (Polish notation):", file=outFile)
+        if bufferSizesInBits[i] == 0:
+            print("    Initial state only", file=outFile)
+        else:
+            if (bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i] - len(propositions) > 0:
+                print("    Bits 0 to " + str((bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i] - len(
+                    propositions) - 1) + ": previous buffer", file=outFile)
+            print("    Bits " + str(
+                (bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i] - len(propositions)) + " to " + str(
+                (bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i] - 1) + ": propositions", file=outFile)
+            if nofBitsIncomingTransitions[i] > 0:
+                print("    Bits " + str((bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i]) + " to " + str(
+                    (bufferSizesInBits[i] % 32) - 1) + ": incoming transition", file=outFile)
+                for transitionIndex, (ls, ll) in enumerate(incomingTransitionsUVWExceptForSelfLoops[i]):
+                    print("       -> Value " + str(transitionIndex) + " for transition from UVW state " + str(ls),
+                          file=outFile)
+
+    print("\n", file=outFile)
+    print("UVW on which the monitor is based:\n", baseUVW, file=outFile)
+
+    print("*/", file=outFile)
+
+
+
+
+
+
+def generateMonitorCodeDeterministic(dfa,baseUVW,propositions,livenessMonitoring,outFile):
 
     # Prepare BDD variables
     bddVariables = [baseUVW.ddMgr.add_expr(a) for a in propositions]
@@ -547,6 +996,9 @@ def generateMonitorCode(dfa,baseUVW,propositions,livenessMonitoring,outFile):
 # ==================================
 # Translate
 # ==================================
+
+
+
 def generateMonitor(inputFile,scriptbasePath,livenessMonitoring):
     with open(inputFile,"r") as inFile:
         allInputLines = list(inFile.readlines())
@@ -609,8 +1061,17 @@ def generateMonitor(inputFile,scriptbasePath,livenessMonitoring):
             baseUVW.mergeEquivalentlyReachableStates()
             baseUVW.removeForwardReachableBackwardSimulatingStates()
             baseUVW.removeUnreachableStates()
-                
-            
+
+    # If no liveness monitoring is performed, remove states from which the all-rejecting state cannot be reached
+    if not livenessMonitoring:
+        # Make all states except for state 0 non-rejecting. Then minimize
+        for i in range(1, len(baseUVW.stateNames)):
+            baseUVW.rejecting[i] = False
+        baseUVW.simulationBasedMinimization()
+        baseUVW.mergeEquivalentlyReachableStates()
+        baseUVW.removeForwardReachableBackwardSimulatingStates()
+        baseUVW.removeUnreachableStates()
+
     # Check if the LTL properties used a proposition not declared previously
     if len(baseUVW.propositions)!=len(propositions):
         for a in baseUVW.propositions:
@@ -654,7 +1115,7 @@ def generateMonitor(inputFile,scriptbasePath,livenessMonitoring):
 # ==================================
 # Pareto optimization
 # ==================================
-def paretoOptimize(baseUVW,propositions,livenessMonitoring,paretoCompiler,paretoLimit):
+def paretoOptimize(baseUVW,propositions,livenessMonitoring,paretoCompiler,paretoLimit,generationAlgorithm):
 
     outputFileC = "/tmp/paretoCheck"+str(os.getpid())+".c" # TODO: Make proper
     outputFileObj = "/tmp/paretoCheck"+str(os.getpid())+".o" # TODO: Make proper
@@ -693,7 +1154,7 @@ def paretoOptimize(baseUVW,propositions,livenessMonitoring,paretoCompiler,pareto
         # Write monitor
         with open(outputFileC,"w") as outputFile:
             dfa = determiniseUVWForMonitoring(restrictedUVW)
-            generateMonitorCode(dfa,restrictedUVW,propositions,livenessMonitoring,outputFile)
+            generateMonitorCode(dfa,restrictedUVW,propositions,livenessMonitoring,outputFile,generationAlgorithm)
         
         # Ok, call compiler script
         assert not ";" in paretoCompiler
@@ -745,6 +1206,8 @@ if __name__ == '__main__':
     nextCompilerScript = False
     nextParetoLimit = False
     nextOutputFile = False
+    monitorGenerationAlgorithm = "deterministic"
+
     for arg in args:
         if nextCompilerScript:
             paretoCompiler = arg
@@ -766,6 +1229,10 @@ if __name__ == '__main__':
                 nextParetoLimit = True
             elif arg == "--outFile":
                 nextOutputFile = True
+            elif arg == "--deterministic":
+                monitorGenerationAlgorithm = "deterministic"
+            elif arg == "--nondeterministic":
+                monitorGenerationAlgorithm = "nondeterministic"
             else:
                 print("Error: Did not understand parameter: "+arg, file=sys.stderr)
                 sys.exit(1)
@@ -791,10 +1258,10 @@ if __name__ == '__main__':
     
     if paretoCompiler is None:
         (dfa,baseUVW,propositions,livenessMonitoring) = generateMonitor(inputFile,scriptBasePath,livenessMonitoring)
-        generateMonitorCode(dfa,baseUVW,propositions,livenessMonitoring,outputFile)
+        generateMonitorCode(dfa,baseUVW,propositions,livenessMonitoring,outputFile,monitorGenerationAlgorithm)
     else:
         (dfa,baseUVW,propositions,livenessMonitoring) = generateMonitor(inputFile,scriptBasePath,livenessMonitoring)
-        paretoOptimize(baseUVW,propositions,livenessMonitoring,paretoCompiler,paretoLimit)
+        paretoOptimize(baseUVW,propositions,livenessMonitoring,paretoCompiler,paretoLimit,monitorGenerationAlgorithm)
     
     
     print("Done. Exiting....",file=sys.stderr)
