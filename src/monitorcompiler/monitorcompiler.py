@@ -18,8 +18,8 @@ def bddToDNF(bdd,mgr,careSet,bddVariables,propositions):
     bddLB = bdd & careSet
     bddUB = bdd | ~careSet
     while bddLB!=mgr.false:
-        print("BDD:",bddLB.to_expr())
-        print("BDDUB:", bddUB.to_expr())
+        # print("BDD:",bddLB.to_expr())
+        # print("BDDUB:", bddUB.to_expr())
         
         # Find concrete assignment
         assignment = []
@@ -284,6 +284,10 @@ def generateMonitorCode(dfa,baseUVW,propositions,livenessMonitoring,outFile,gene
         generateMonitorCodeDeterministic(dfa, baseUVW, propositions, livenessMonitoring, outFile)
     elif generationAlgorithm=="nondeterministic":
         generateMonitorCodeNondeterministic(dfa, baseUVW, propositions, livenessMonitoring, outFile)
+    elif generationAlgorithm== "aig":
+        generateMonitorCodeAIGBased(dfa, baseUVW, propositions, livenessMonitoring, outFile)
+    else:
+        raise Exception("Unknown monitor generation algorithm.")
 
 
 def pickCNFOrDNFWhateverIsShorter(cnfLabel,dnfLabel,outFile, varNames):
@@ -546,148 +550,6 @@ def generateMonitorCodeNondeterministic(dfa,baseUVW,propositions,livenessMonitor
     print("")
     print("}\n", file=outFile)
 
-    if False:
-
-        print("  switch (currentState) {", file=outFile)
-        for s in range(len(dfa.states)):
-            if not s in dfa.accepting:
-                print("    case " + str(s) + ":", file=outFile)
-                print("      /* UVW states: " + " ".join(
-                    [str(i) for i in range(len(baseUVW.stateNames)) if dfa.states[s][i]]) + " */", file=outFile)
-                # Iterate over the transitions and perform transitions
-                careSet = baseUVW.ddMgr.true
-                for transNo, (toDFA, label, uvwTrans) in enumerate(dfa.transitions[s]):
-                    # Try CNF and DNF for the transition condition
-                    # print("Cond Label: ",label.to_expr())
-                    dnfLabel = bddToDNF(label, baseUVW.ddMgr, careSet, bddVariables, propositions)
-                    cnfLabel = bddToDNF(~label, baseUVW.ddMgr, careSet, bddVariables, propositions)
-                    careSet &= ~label
-                    if transNo == 0:
-                        print("      if (", end="", file=outFile)
-                    else:
-                        print("      } else if (", end="", file=outFile)
-
-
-                    print(") {", file=outFile)
-                    if (toDFA == s):
-                        print("        /* Stay in the same DFA state */", file=outFile)
-                    else:
-                        print("        currentState = " + str(toDFA) + ";", file=outFile)
-
-                    # Update buffers
-                    # -> Determine which parts are new.
-                    newStates = []
-                    fromWhere = []
-                    for uvwStateNum in range(0, len(baseUVW.stateNames)):
-
-                        # Only copy buffers if not safety violating *or* for buffer 0
-                        if (not toDFA in dfa.accepting) or (uvwStateNum == 0) or (not 0 in dfa.states[toDFA]):
-
-                            # Check if uvwStateNum is left along this transition -- then copying is necessary!
-                            stayInUVWState = False
-                            for uvwTransNo, (fromUVW, toUVW, label) in enumerate(uvwTrans):
-                                if (fromUVW == toUVW) and (toUVW == uvwStateNum):
-                                    stayInUVWState = True
-
-                            # Increase counter
-                            if stayInUVWState and dfa.states[toDFA][uvwStateNum] and livenessMonitoring and \
-                                    baseUVW.rejecting[uvwStateNum]:
-                                print("        cnt" + str(uvwStateNum) + "++;", file=outFile)
-
-                            # If state is newly entered copy buffer information
-                            if dfa.states[toDFA][uvwStateNum] and not stayInUVWState:
-                                # Ok, this one is new. Search for transition
-                                foundUVWTransition = False
-                                for uvwTransNo, (fromUVW, toUVW, label) in enumerate(uvwTrans):
-                                    if not foundUVWTransition:
-                                        if (toUVW == uvwStateNum):
-                                            foundUVWTransition = True
-                                            # Perform copy
-                                            indexIncomingTransition = -1
-                                            # print("NOF INCOMING: ",incomingTransitionsUVWExceptForSelfLoops[toUVW])
-                                            for transitionIndex, (ls, ll) in enumerate(
-                                                    incomingTransitionsUVWExceptForSelfLoops[toUVW]):
-                                                if (ls, ll) == (fromUVW, label):
-                                                    indexIncomingTransition = transitionIndex
-                                            assert indexIncomingTransition != -1
-
-                                            if livenessMonitoring and baseUVW.rejecting[toUVW] and not toUVW == 0:
-                                                print("        cnt" + str(toUVW) + " = 0;", file=outFile)
-
-                                            # Low bits
-                                            for index in range(0, bufferSizesInBits[toUVW] // 32 - bufferSizesInBits[
-                                                uvwStateNum] // 32):
-                                                print("        " + bufferVarNames[(toUVW, index)] + " = " + bufferVarNames[
-                                                    (fromUVW, index)] + +";", file=outFile)
-                                            # Cases
-                                            if ((bufferSizesInBits[fromUVW] % 32) < (bufferSizesInBits[toUVW] % 32)):
-                                                # Simple case: appending all to the same part
-                                                wordIndex = bufferSizesInBits[toUVW] // 32
-                                                # Copy part
-                                                # TODO: This fails for large specs. Index computations do not seem to be correct.
-                                                print("        " + bufferVarNames[(toUVW, wordIndex)] + " = " +
-                                                      bufferVarNames[(fromUVW, wordIndex)], end="", file=outFile)
-                                                # Add proposition values
-                                                print(" | (v << " + str(
-                                                    (bufferSizesInBits[toUVW] % 32) - nofBitsIncomingTransitions[
-                                                        toUVW] - len(propositions)) + ")", end="", file=outFile)
-
-                                                # Add source
-                                                if (nofBitsIncomingTransitions[toUVW] > 0):
-                                                    print(" | (" + str(indexIncomingTransition) + " << " + str(
-                                                        (bufferSizesInBits[toUVW] % 32) - nofBitsIncomingTransitions[
-                                                            toUVW]) + ")", end="", file=outFile)
-                                                print(";", file=outFile)
-                                            else:
-                                                raise Exception("This case is currently unimplemented.")
-                                assert foundUVWTransition
-
-                                # In case we do not have a violation, increase liveness counters
-                    if not toDFA in dfa.accepting and livenessMonitoring:
-
-                        # The liveness monitored states are numbered through so that a mask can be used
-                        posLivenessMonitoredValue = 0
-                        posLivenessMonitoredPos = 0
-
-                        # Check if we have a rejecting state
-                        for uvwStateNum in range(0, len(baseUVW.stateNames)):
-
-                            # Only copy buffers if not safety violating *or* for buffer 0
-                            if not (uvwStateNum == 0) and baseUVW.rejecting[uvwStateNum]:
-
-                                # Check if uvwStateNum is left along this transition -- then copying is necessary!
-                                stayInUVWState = False
-                                for uvwTransNo, (fromUVW, toUVW, label) in enumerate(uvwTrans):
-                                    if (fromUVW == toUVW) and (toUVW == uvwStateNum):
-                                        stayInUVWState = True
-                                if stayInUVWState:
-                                    posLivenessMonitoredValue += (1 << posLivenessMonitoredPos)
-                                posLivenessMonitoredPos += 1
-
-                        if posLivenessMonitoredValue > 0:
-                            print("        livenessMonitoring(" + str(posLivenessMonitoredValue) + ");", file=outFile)
-
-                    # In case we had a violation, log a violation
-                    if toDFA in dfa.accepting:
-                        # Log violation!
-                        # Case 1: Safety violation -- here, we use the fact that state 0 is always
-                        # the state rejecting everything in the UVW library
-                        if dfa.states[toDFA][0]:
-                            print("        logViolationExplanation(" + str(toDFA) + ",&(buf.b0p0)," + str(
-                                bufferSizesInWords[0] * 4) + ");", file=outFile)
-                        else:
-                            print("        logViolationExplanation(" + str(toDFA) + ",&buf,sizeof(buf));", file=outFile)
-
-                print("      }", file=outFile)
-                print("      break;", file=outFile)
-        print("    default:", file=outFile)
-        for s in range(len(dfa.states)):
-            if s in dfa.accepting:
-                print("      /* DFA State " + str(s) + " has UVW states: " + " ".join(
-                    [str(i) for i in range(len(baseUVW.stateNames)) if dfa.states[s][i]]) + " */", file=outFile)
-        print("      break;", file=outFile)
-
-
     # Add decoding information for the buffers:
     print("/* Decoding information for the buffers:", file=outFile)
     print("   -------------------------------------\n", file=outFile)
@@ -717,6 +579,599 @@ def generateMonitorCodeNondeterministic(dfa,baseUVW,propositions,livenessMonitor
 
 
 
+def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outFile):
+
+    # Prepare BDD variables and their compiled names
+    allBDDVarNames = list(propositions)
+    bddVariables = [baseUVW.ddMgr.add_expr(a) for a in propositions]
+    for stateNum in range(len(baseUVW.stateNames)):
+        baseUVW.ddMgr.declare("uvwState" + str(stateNum))
+        bddVariables.append(baseUVW.ddMgr.add_expr("uvwState"+str(stateNum)))
+        allBDDVarNames.append("uvwState"+str(stateNum))
+
+    # =======================================
+    # Compute reachable states in the monitor
+    # =======================================
+    for stateNum in range(len(baseUVW.stateNames)):
+        baseUVW.ddMgr.declare("uvwState" + str(stateNum)+"post")
+    trans = baseUVW.ddMgr.true
+    for s in range(len(baseUVW.stateNames)):
+        postBDD = baseUVW.ddMgr.false
+        for fromState in range(len(baseUVW.stateNames)):
+            for (a, b) in baseUVW.transitions[fromState]:
+               if a==s:
+                   postBDD = postBDD | (baseUVW.ddMgr.add_expr("uvwState"+str(fromState)) & b)
+        print("POST ",s,":",baseUVW.ddMgr.to_expr(postBDD))
+        trans = trans & baseUVW.ddMgr.add_expr("uvwState"+str(s)+"post").equiv(postBDD)
+        # print("POST uvwState"+str(s)+":"+postBDD.to_expr())
+
+    reachable = baseUVW.ddMgr.true
+    for i, s in enumerate(baseUVW.stateNames):
+        if i in baseUVW.initialStates:
+            reachable = reachable & baseUVW.ddMgr.add_expr("uvwState" + str(i))
+        else:
+            reachable = reachable & ~baseUVW.ddMgr.add_expr("uvwState" + str(i))
+    # saturate
+    print("REACH:", baseUVW.ddMgr.to_expr(reachable))
+    oldReachable = baseUVW.ddMgr.false
+    while oldReachable != reachable:
+        oldReachable = reachable
+        reachable = reachable & trans
+        print("REACHX:", baseUVW.ddMgr.to_expr(reachable))
+        for a in propositions:
+            reachable = baseUVW.ddMgr.exist([a], reachable)
+        for stateNum in range(len(baseUVW.stateNames)):
+            reachable = baseUVW.ddMgr.exist(["uvwState"+str(stateNum)], reachable)
+        replaceDict = {"uvwState"+str(a)+"post" : "uvwState"+str(a) for a in range(0,len(baseUVW.stateNames))}
+        reachable = baseUVW.ddMgr.let(replaceDict,reachable) | oldReachable
+
+    # debug
+    print("REACH:", baseUVW.ddMgr.to_expr(reachable))
+    allReach = bddToDNF(reachable, baseUVW.ddMgr, baseUVW.ddMgr.true, bddVariables[len(propositions):], allBDDVarNames[len(propositions):])
+    print("allReach: ",allReach)
+
+
+
+    # Compute number of Bits for each state buffer - Recursively
+    bufferSizesInBits = [-1 for state in baseUVW.stateNames]
+    incomingTransitionsUVWExceptForSelfLoops = [[] for state in baseUVW.stateNames]
+    incomingTransitionsUVWIncludingSelfLoops = [[] for state in baseUVW.stateNames]
+    for s in range(len(baseUVW.stateNames)):
+        for (a, b) in baseUVW.transitions[s]:
+            if (a != s):
+                incomingTransitionsUVWExceptForSelfLoops[a].append((s, b))
+            incomingTransitionsUVWIncludingSelfLoops[a].append((s, b))
+
+    # Reorder incomingTransitions So That Self Loops are in the front!
+    # This is important for code generation so that buffer contents
+    # are only overwritten when needed.
+    for s in range(0,len(incomingTransitionsUVWIncludingSelfLoops)):
+        theseTrans = incomingTransitionsUVWIncludingSelfLoops[s]
+        newTrans = [(a,b) for (a,b) in theseTrans if a==s]
+        newTrans += [(a, b) for (a, b) in theseTrans if a != s]
+        incomingTransitionsUVWIncludingSelfLoops[s] = theseTrans
+
+    nofBitsIncomingTransitions = []
+    for s in range(len(baseUVW.stateNames)):
+        # Count non-self-looping transitions
+        cnt = 0
+        for (a, b) in incomingTransitionsUVWExceptForSelfLoops[s]:
+            if (a != s):
+                cnt += 1
+        if cnt > 0:
+            nofBitsIncomingTransitions.append(math.ceil(math.log(cnt) / math.log(2)))
+        else:
+            nofBitsIncomingTransitions.append(0)
+
+    def recurseComputerBufferSizes(uvwState):
+        if bufferSizesInBits[uvwState] != -1:
+            return
+        maxBufferSize = 0
+        for (a, b) in incomingTransitionsUVWExceptForSelfLoops[uvwState]:
+            recurseComputerBufferSizes(a)
+            maxBufferSize = max(maxBufferSize,
+                                bufferSizesInBits[a] + len(propositions) + nofBitsIncomingTransitions[uvwState])
+        bufferSizesInBits[uvwState] = maxBufferSize
+
+    for s in range(len(baseUVW.stateNames)):
+        recurseComputerBufferSizes(s)
+
+    # Compute buffer sizes in #32-bit uints
+    bufferSizesInWords = [int(math.ceil(a / 32.0)) for a in bufferSizesInBits]
+
+    # print("Buffer sizes:",bufferSizesInBits)
+    # print(nofBitsIncomingTransitions)
+
+    # Sanity check -- at most 32 bits added per trace element
+    # (the sanity check fails slightly unnecessarily if there are no transitions in the UVW)
+    maxNofBitsTransitions = max(1, max([len(a) for a in incomingTransitionsUVWExceptForSelfLoops]))
+    assert math.ceil(math.log(maxNofBitsTransitions) / math.log(2)) + len(propositions) <= 32
+
+
+    # Compute AIG for all if conditions
+    conditionBits = {}
+    for toState in range(len(baseUVW.stateNames)):
+
+        # Enumerate all incoming transitions
+        parts = []
+        for transitionIndex,(fromState, condition) in enumerate(incomingTransitionsUVWIncludingSelfLoops[toState]):
+
+            # Compute DNF of the condition
+            dnfLabel = bddToDNF(condition, baseUVW.ddMgr, baseUVW.ddMgr.true, bddVariables, allBDDVarNames)
+            allDisjuncts = []
+            for label in dnfLabel:
+                allConjuncts = []
+                for i,value in enumerate(label):
+                    if value!=None:
+                        if value:
+                            allConjuncts.append(allBDDVarNames[i])
+                        else:
+                            allConjuncts.append(("!",allBDDVarNames[i]))
+                allDisjuncts.append(("&",tuple(allConjuncts)))
+            parts.append(("&",(("|",tuple(allDisjuncts)),"uvwState"+str(fromState))))
+            # if not fromState==toState:
+            conditionBits["uvwState"+str(toState)+"incoming"+str(transitionIndex)] = parts[-1]
+
+        conditionBits["uvwState" + str(toState) + "Next"] = ("|", tuple(parts))
+
+    # Write AIG to (BLIF) file
+    with open("test.blif","w") as blifFile:
+
+        blifFile.write(".model monitorBlif\n")
+        blifFile.write(".inputs")
+        for a in allBDDVarNames:
+            blifFile.write(" "+a)
+        blifFile.write("\n.outputs")
+        for (a,b) in conditionBits.items():
+            blifFile.write(" " + a)
+        blifFile.write("\n")
+
+        elementDictionary = {}
+
+        def recurseEncode(outName,element):
+            # Cache lookup
+            if outName is None and element in elementDictionary:
+                return elementDictionary[element]
+
+            if isinstance(element,str):
+                return element
+            elif element[0]=="!":
+                # Negation
+                assert len(element)==2
+                subPart = recurseEncode(None,element[1])
+                if outName is None:
+                    outName = "internal"+str(len(elementDictionary))
+                blifFile.write(".names "+subPart+" "+outName+"\n")
+                blifFile.write("0 1\n")
+                elementDictionary[element] = outName
+                return outName
+            elif element[0]=="|":
+                # Negation
+                assert len(element) == 2
+                subParts = [recurseEncode(None, u) for u in element[1]]
+                if outName is None:
+                    outName = "internald" + str(len(elementDictionary))
+                if len(subParts) == 0:
+                    blifFile.write(".names " + outName + "\n")
+                    elementDictionary[element] = outName
+                    return outName
+                else:
+                    blifFile.write(".names " + " ".join(subParts) + " " + outName + "\n")
+                    for i in range(0,len(subParts)):
+                        blifFile.write("-"*i+"1"+"-"*(len(subParts)-i-1)+" 1\n")
+                    elementDictionary[element] = outName
+                    return outName
+            elif element[0]=="&":
+                # Negation
+                assert len(element) == 2
+                subParts = [recurseEncode(None, u) for u in element[1]]
+                if outName is None:
+                    outName = "internalc" + str(len(elementDictionary))
+                if len(subParts)==0:
+                    blifFile.write(".names " + outName + "\n")
+                    blifFile.write(" 1\n")
+                    elementDictionary[element] = outName
+                    return outName
+                else:
+                    blifFile.write(".names " + " ".join(subParts) + " " + outName + "\n")
+                    blifFile.write("1"*len(subParts)+" 1\n")
+                    elementDictionary[element] = outName
+                    return outName
+            else:
+                raise Exception("Unknown BLIF Encoding type: ",element[0])
+
+        for (a,b) in conditionBits.items():
+            recurseEncode(a,b)
+
+        blifFile.write(".end\n")
+
+    # Encode EXDC
+    with open("testDC.blif","w") as blifFile:
+        blifFile.write(".model monitorEXDC\n")
+        blifFile.write(".inputs "+" ".join(allBDDVarNames))
+        blifFile.write("\n.outputs exdc")
+        blifFile.write("\n.names "+" ".join(allBDDVarNames)+" exdc\n")
+        for case in allReach:
+            blifFile.write("-"*len(propositions))
+            for a in case:
+                if a is None:
+                    blifFile.write("-")
+                elif a == False:
+                    blifFile.write("0")
+                elif a == True:
+                    blifFile.write("1")
+            blifFile.write(" ")
+            # blifFile.write("1"*len(baseUVW.stateNames))
+            blifFile.write("0")
+            blifFile.write("\n")
+
+        blifFile.write(".end\n")
+
+
+    # Optimize using ABC
+    with subprocess.Popen("./abc -c \"read test.blif; resyn3; resyn2; resyn3; resyn2; resyn3; write testOut.blif\"",shell=True) as abcProcess:
+        assert abcProcess.wait() == 0
+
+    # Read back BLIF file
+    aigDefinitions = {}
+    orderAIGNodes = []
+    with open("testOut.blif","r") as blifInFile:
+        currentAIGDefinition = None
+        overlay = None
+        for line in blifInFile.readlines():
+            if not overlay is None:
+                line = overlay + line.strip()
+            if line.strip().endswith("\\"):
+                line = line.strip()
+                overlay = line[0:len(line)-1]
+            else:
+                overlay = None
+                if line.startswith("#"):
+                    pass
+                elif line.startswith("."):
+                    # special
+                    if line.startswith(".model"):
+                        pass
+                    elif line.startswith(".inputs"):
+                        inputAPsRead = line[8:].strip().split(" ")
+                        if not inputAPsRead==allBDDVarNames:
+                            raise Exception("Not the same inputs: \n"+str(inputAPsRead)+"\n"+str(allBDDVarNames))
+                    elif line.startswith(".outputs"):
+                        outputAPsRead = line[8:].strip().split(" ")
+                        if outputAPsRead!=[a for (a,b) in conditionBits.items()]:
+                            raise Exception("Not the same outputs: \n"+str(outputAPsRead)+"\n"+str(conditionBits))
+                    elif line.startswith(".end"):
+                        pass
+                    elif line.startswith(".names"):
+                        aps = line[7:].strip().split(" ")
+                        assert not aps[-1] in aigDefinitions
+                        aigDefinitions[aps[-1]] = [aps[0:len(aps)-1],[]]
+                        currentAIGDefinition = aps[-1]
+                        orderAIGNodes.append(aps[-1])
+                else:
+                    aigDefinitions[currentAIGDefinition][1].append(line.strip())
+
+
+    # =============================================================================
+    # Encode optimization problem for multi-output LUT generation as PySAT instance
+    # =============================================================================
+    from pysat.formula import CNF, IDPool
+    from pysat.solvers import Lingeling
+    from pysat.card import CardEnc, EncType
+
+    nofLUTs = 5
+    nofInputsPerLUT = 5
+
+    # Define solution variables
+    nofVarsSoFar = 0
+    formula = CNF()
+    varsLUTInputSelection = []
+    varsLUTSignalDefinition = []
+    for lut in range(nofLUTs):
+
+        # LUT Inputs
+        thisOne = {}
+        varsLUTInputSelection.append(thisOne)
+        for a in allBDDVarNames:
+            nofVarsSoFar += 1
+            thisOne[a] = nofVarsSoFar
+            print("Input Def",lut,a+": ",nofVarsSoFar)
+        for a in aigDefinitions:
+            nofVarsSoFar += 1
+            thisOne[a] = nofVarsSoFar
+            print("Input Def",lut,a + ": ", nofVarsSoFar)
+
+        # LUT Outputs
+        thisOne = {}
+        varsLUTSignalDefinition.append(thisOne)
+        for a in aigDefinitions:
+            nofVarsSoFar += 1
+            thisOne[a] = nofVarsSoFar
+            print("Output Def",lut,a + ": ", nofVarsSoFar)
+
+    # Encode: Every output signal must be defined at least once
+    for a in aigDefinitions:
+        formula.append([varsLUTSignalDefinition[j][a] for j in range(nofLUTs)])
+
+    # Encode: Every LUT can only define the outputs that it has the input to
+    for lut in range(nofLUTs):
+        for (aigNodeName,aigDef) in aigDefinitions.items():
+            inputSignals = aigDef[0]
+            print("Input signals of "+str(aigNodeName)+": "+str(inputSignals))
+            for insig in inputSignals:
+                if insig in aigDefinitions:
+                    # Inner signal
+                    prevDefinitions = [varsLUTSignalDefinition[lutm][insig] for lutm in range(0,lut)]
+                    formula.append([-1*varsLUTSignalDefinition[lut][aigNodeName],varsLUTSignalDefinition[lut][insig]]+prevDefinitions)
+                    formula.append([-1 * varsLUTSignalDefinition[lut][aigNodeName],varsLUTSignalDefinition[lut][insig],varsLUTInputSelection[lut][insig]])
+                else:
+                    # Input signal - has to come from here.
+                    formula.append([-1 * varsLUTSignalDefinition[lut][aigNodeName], varsLUTInputSelection[lut][insig]])
+
+    # Encode: at most nofInputsPerLUT selected per level
+    vpool = IDPool(start_from=nofVarsSoFar)
+    for lut in range(nofLUTs):
+        am1 = CardEnc.atmost([b for (a,b) in varsLUTInputSelection[lut].items()],nofInputsPerLUT,vpool=vpool, encoding=EncType.sortnetwrk)
+        formula.extend(am1)
+
+    formula.to_file("test.cnf")
+
+    with Lingeling(bootstrap_with=formula.clauses) as l:
+        if l.solve() == False:
+            raise Exception("No solution.")
+        else:
+            # Get solution
+            solution = l.get_model()
+
+    # Support check
+    for lut in range(0,nofLUTs):
+        if len([a for a in aigDefinitions if varsLUTSignalDefinition[lut][a] in solution])>32:
+            raise Exception("Too many LUT outputs -- currently unsupported.")
+
+    # Declare variables in Monitor code
+    print("#include \"UVWMonitor.h\"", file=outFile)
+    print("#include <stdbool.h>", file=outFile)
+    print("/* Declare variables for monitoring */", file=outFile)
+
+    for uvwState in range(len(baseUVW.stateNames)):
+        if uvwState in baseUVW.initialStates:
+            print("bool uvwState" + str(uvwState) + " = 1;", file=outFile)
+        else:
+            print("bool uvwState"+str(uvwState)+" = 0;",file=outFile)
+
+    print("struct bufType {", file=outFile)
+    bufferVarNames = {}
+    initParts = []
+    for i, a in enumerate(bufferSizesInWords):
+        for j in range(a):
+            bufferVarNames[(i, j)] = "buf.b" + str(i) + "p" + str(j);
+            print("  uint32_t b" + str(i) + "p" + str(j) + ";", file=outFile)
+            initParts.append("0")
+    print("} buf = {" + ",".join(initParts) + "};", file=outFile)
+    for i, a in enumerate(bufferSizesInWords):
+        if bufferSizesInBits[i] == 0:
+            bufferVarNames[(i, 0)] = "b" + str(i) + "p" + str(0);
+            print("const uint32_t b" + str(i) + "p0 = 0;", file=outFile)
+    for i, a in enumerate(bufferSizesInWords):
+        if livenessMonitoring and baseUVW.rejecting[i] and i > 0:  # No counter for the FASLE
+            print("uint32_t cnt" + str(i) + " = 0;", file=outFile)
+
+    # LUT table declaration
+    print("", file=outFile)
+    for lut in range(0, nofLUTs):
+        print("uint32_t lut"+str(lut)+"[];", file=outFile)
+
+    # Main monitoring function
+    print("\nvoid monitorUpdate(uint32_t apValues) {", file=outFile)
+
+    # Compute LUTs
+    locations = {}
+    for i,p in enumerate(propositions):
+        locations[p] = "(apValues & "+str(1 << i)+")"
+    for i, p in enumerate(baseUVW.stateNames):
+        locations["uvwState"+str(i)] = "uvwState"+str(i)
+
+    LUTLocalIO = []
+    for lut in range(0,nofLUTs):
+
+        # LUT input
+        print("  uint32_t lut"+str(lut)+"input = ", file=outFile,end="")
+        currentIndex = 0
+        localInputs = []
+        for i,a in enumerate(varsLUTInputSelection[lut]):
+            if varsLUTInputSelection[lut][a] in solution:
+                if currentIndex>0:
+                    print(" + ", file=outFile,end="")
+                print("("+locations[a]+">0?"+str(1<<currentIndex)+":0)", file=outFile,end="")
+                localInputs.append(a)
+                currentIndex += 1
+        if currentIndex==0:
+            print("0",file=outFile,end="") # Special case - LUT not actually used.
+        print(";",file=outFile)
+
+        # LUT output
+        print("  uint32_t lut" + str(lut) + "output = lut"+str(lut)+"[lut"+str(lut)+"input];", file=outFile)
+        currentIndex = 0
+        localOutputs = []
+        for i,a in enumerate(aigDefinitions):
+            if varsLUTSignalDefinition[lut][a] in solution:
+                locations[a] = "(lut" + str(lut) + "output & "+str(1 << currentIndex)+")"
+                localOutputs.append(a)
+                currentIndex += 1
+
+        LUTLocalIO.append((localInputs,localOutputs))
+
+    for stateNum in range(len(baseUVW.stateNames)):
+
+        # Incoming transitions - copy buffer information
+        first = True
+        for i,(fromState,condition) in enumerate(incomingTransitionsUVWIncludingSelfLoops[stateNum]):
+            if first:
+                print("  ", file=outFile,end="")
+            if not first:
+                print(" else ", file=outFile, end="")
+            first = False
+            transitionCond = locations["uvwState"+str(stateNum)+"incoming"+str(i)]
+            print("if ("+transitionCond, file=outFile, end="")
+            print(") {", file=outFile)
+
+            if fromState!=stateNum:
+                print("Mux: ",baseUVW.transitions[fromState])
+                indexIncomingTransition = -1
+                for transitionIndex, (ls, ll) in enumerate(
+                        incomingTransitionsUVWExceptForSelfLoops[stateNum]):
+                    print("ENUM:",ls,ll,fromState,fromState)
+                    if (ls, ll) == (fromState, condition):
+                        indexIncomingTransition = transitionIndex
+                assert indexIncomingTransition != -1
+
+                # Low bits
+                for index in range(0, bufferSizesInBits[fromState] // 32):
+                    print("    " + bufferVarNames[(stateNum, index)] + " = " + bufferVarNames[
+                        (fromState, index)] + +";", file=outFile)
+                # Cases
+                if ((bufferSizesInBits[fromState] % 32) < (bufferSizesInBits[stateNum] % 32)):
+                    # Simple case: appending all to the same part
+                    wordIndex = bufferSizesInBits[stateNum] // 32
+                    # Copy part
+                    # TODO: This fails for large specs. Index computations do not seem to be correct.
+                    print("    " + bufferVarNames[(stateNum, wordIndex)] + " = " +
+                          bufferVarNames[(fromState, wordIndex)], end="", file=outFile)
+                    # Add proposition values
+                    print(" | (apValues << " + str(
+                        (bufferSizesInBits[stateNum] % 32) - nofBitsIncomingTransitions[
+                            stateNum] - len(propositions)) + ")", end="", file=outFile)
+
+                    # Add source
+                    if nofBitsIncomingTransitions[stateNum] > 0:
+                        print(" | (" + str(indexIncomingTransition) + " << " + str(
+                            (bufferSizesInBits[stateNum] % 32) - nofBitsIncomingTransitions[
+                                stateNum]) + ")", end="", file=outFile)
+                    print(";", file=outFile)
+                else:
+                    raise Exception("This case is currently unimplemented.")
+
+            else:
+                # Counter increase
+                if livenessMonitoring:
+                    if not (stateNum == 0) and baseUVW.rejecting[stateNum]:
+                        print("    cnt" + str(stateNum) + "++;", file=outFile)
+                        print("    if ((cnt" + str(stateNum) + " & FREQUENCY_MASK_STARVATION_LOGGING)==0) {",
+                              file=outFile)
+                        print("      logLivenessStarvation(" + str(stateNum) + ",cnt" + str(
+                            stateNum) + ", &buf.b" + str(
+                            stateNum) + "p0," + str(bufferSizesInWords[stateNum]) + ");", file=outFile)
+                        print("    }", file=outFile)
+
+            if stateNum==0:
+                print("    logViolationExplanation(0,&(buf.b0p0)," + str(bufferSizesInWords[0] * 4) + ");", file=outFile)
+
+            print("  }", file=outFile,end="")
+        print("", file=outFile)
+
+    # Next states
+    for i, a in enumerate(baseUVW.stateNames):
+        print("  uvwState"+str(i) + " = ("+ locations["uvwState"+str(i)+"Next"]+")>0?1:0;", file=outFile)
+    print("")
+    print("}\n", file=outFile)
+
+    # LUT computation
+    for lut in range(nofLUTs):
+        (localInputs,localOutputs) = LUTLocalIO[lut]
+
+        # Build LUT table
+        print("uint32_t lut"+str(lut)+"["+str(1 << len(localInputs))+"] = {", file=outFile,end="")
+        for lutInput in range(1 << len(localInputs)):
+            # print("LUT:",lut,lutInput)
+            assignments = {}
+            for i,a in enumerate(localInputs):
+                assignments[a] = (lutInput & (1 << i))>0
+            # Populate assignments
+            for aigNode in orderAIGNodes:
+                theseInputs = aigDefinitions[aigNode][0]
+                valueLines = aigDefinitions[aigNode][1]
+                allInputsSet = True
+                inputVector = ""
+                for a in theseInputs:
+                    if not a in assignments:
+                        allInputsSet = False
+                    else:
+                        if assignments[a]:
+                            inputVector = inputVector + "1"
+                        else:
+                            inputVector = inputVector + "0"
+                match = None
+                # print("INPUT:", inputVector,aigNode)
+                if allInputsSet:
+                    for line in valueLines:
+                        thisMatch = True
+                        for j,b in enumerate(inputVector):
+                            if line[j]!=inputVector[j] and line[j]!='-':
+                                thisMatch = False
+                        if thisMatch:
+                            if line[-1]=='1':
+                                match = True
+                            elif line[-1]=='0':
+                                match = False
+                            else:
+                                raise Exception("Can't parse BLIF line.")
+                    if match is None:
+                        # Default
+                        if valueLines[0][-1] == '1':
+                            match = False
+                        else:
+                            match = True
+                    assignments[aigNode] = match
+            # Ok, now compile the output
+            # print("Asign:",assignments)
+            overallValue = 0
+            for j,out in enumerate(localOutputs):
+                assert not assignments[out] is None # If this fails, then in the input BLIF file, the AIG nodes are not in topological order - all gates must only use inputs already defined.
+                if assignments[out]:
+                    overallValue += (1 << j)
+
+            # Printing
+            if (lutInput % 8)==0 and lutInput>0:
+                print("\n    ",end="",file=outFile)
+            print(hex(overallValue),end="",file=outFile)
+            if lutInput < (1 << len(localInputs))-1:
+                print(",",end="",file=outFile)
+        print("};",file=outFile)
+
+
+    # Add decoding information for the buffers:
+    print("\n/* Decoding information for the buffers:", file=outFile)
+    print("   -------------------------------------\n", file=outFile)
+    for i in range(0, len(baseUVW.stateNames)):
+        print(" - UVW state " + str(i) + " with LTL subformula (Polish notation):", file=outFile)
+        if bufferSizesInBits[i] == 0:
+            print("    Initial state only", file=outFile)
+        else:
+            if (bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i] - len(propositions) > 0:
+                print("    Bits 0 to " + str((bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i] - len(
+                    propositions) - 1) + ": previous buffer", file=outFile)
+            print("    Bits " + str(
+                (bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i] - len(propositions)) + " to " + str(
+                (bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i] - 1) + ": propositions", file=outFile)
+            if nofBitsIncomingTransitions[i] > 0:
+                print("    Bits " + str((bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i]) + " to " + str(
+                    (bufferSizesInBits[i] % 32) - 1) + ": incoming transition", file=outFile)
+                for transitionIndex, (ls, ll) in enumerate(incomingTransitionsUVWExceptForSelfLoops[i]):
+                    print("       -> Value " + str(transitionIndex) + " for transition from UVW state " + str(ls),
+                          file=outFile)
+
+    print("\n", file=outFile)
+    print("UVW on which the monitor is based:\n", baseUVW, file=outFile)
+
+    print("*/", file=outFile)
+
+    # Print LUT information
+    print("\n/* Lookup-Table contents:", file=outFile)
+    for lut in range(0,nofLUTs):
+        print("- LUT "+str(lut)+" has:", file=outFile)
+        print("  -> Inputs "+" ".join([a for a in varsLUTInputSelection[lut] if varsLUTInputSelection[lut][a] in solution]), file=outFile)
+        print("  -> Outputs " + " ".join([a for a in aigDefinitions if varsLUTSignalDefinition[lut][a] in solution]), file=outFile)
+    print("*/",file=outFile)
 
 
 def generateMonitorCodeDeterministic(dfa,baseUVW,propositions,livenessMonitoring,outFile):
@@ -986,10 +1441,6 @@ def generateMonitorCodeDeterministic(dfa,baseUVW,propositions,livenessMonitoring
             
     print("\n",file=outFile)
     print("UVW on which the monitor is based:\n",baseUVW,file=outFile)
-    
-    
-    
-                            
     print("*/",file=outFile)
 
 
@@ -1233,6 +1684,8 @@ if __name__ == '__main__':
                 monitorGenerationAlgorithm = "deterministic"
             elif arg == "--nondeterministic":
                 monitorGenerationAlgorithm = "nondeterministic"
+            elif arg == "--aigBased":
+                monitorGenerationAlgorithm = "aig"
             else:
                 print("Error: Did not understand parameter: "+arg, file=sys.stderr)
                 sys.exit(1)
