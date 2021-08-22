@@ -32,7 +32,7 @@ jobs:
     - name: Install various packages needed for compiling spot
       run: sudo apt-get install latexmk texlive-latex-extra texlive-fonts-extra texlive-science pdf2svg
     - name: Get the dd library dependencies
-      run: wget https://raw.githubusercontent.com/tulip-control/dd/main/setup.py; python3 setup.py egg_info; pip install -r *.egg-info/requires.txt
+      run: git clone https://github.com/tulip-control/dd; cd dd; python3 setup.py egg_info; pip install -r *.egg-info/requires.txt
     - name: Get the dd library
       run: pip3 install dd --install-option="--fetch" --install-option="--cudd"
     - name: Get SPOT
