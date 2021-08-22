@@ -279,13 +279,13 @@ def bitListToCCodeNumber(case,invert):
 #============================================================================
 # Code Generation
 #============================================================================
-def generateMonitorCode(dfa,baseUVW,propositions,livenessMonitoring,outFile,generationAlgorithm):
+def generateMonitorCode(dfa,baseUVW,propositions,livenessMonitoring,outFile,generationAlgorithm,nofLUTS,nofInputsPerLUT):
     if generationAlgorithm=="deterministic":
         generateMonitorCodeDeterministic(dfa, baseUVW, propositions, livenessMonitoring, outFile)
     elif generationAlgorithm=="nondeterministic":
         generateMonitorCodeNondeterministic(dfa, baseUVW, propositions, livenessMonitoring, outFile)
     elif generationAlgorithm== "aig":
-        generateMonitorCodeAIGBased(dfa, baseUVW, propositions, livenessMonitoring, outFile)
+        generateMonitorCodeAIGBased(dfa, baseUVW, propositions, livenessMonitoring, outFile,nofLUTS,nofInputsPerLUT)
     else:
         raise Exception("Unknown monitor generation algorithm.")
 
@@ -579,7 +579,7 @@ def generateMonitorCodeNondeterministic(dfa,baseUVW,propositions,livenessMonitor
 
 
 
-def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outFile):
+def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outFile,nofLUTs,nofInputsPerLUT):
 
     # Prepare BDD variables and their compiled names
     allBDDVarNames = list(propositions)
@@ -859,9 +859,6 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
     from pysat.solvers import Lingeling
     from pysat.card import CardEnc, EncType
 
-    nofLUTs = 5
-    nofInputsPerLUT = 5
-
     # Define solution variables
     nofVarsSoFar = 0
     formula = CNF()
@@ -923,6 +920,50 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
             # Get solution
             solution = l.get_model()
 
+
+    # Compute representation of LUTs
+    # Compute LUTs
+    locations = {}
+    for i, p in enumerate(propositions):
+        locations[p] = "(apValues & " + str(1 << i) + ")"
+    for i, p in enumerate(baseUVW.stateNames):
+        locations["uvwState" + str(i)] = "uvwState" + str(i)
+    LUTLocalIO = []
+    for lut in range(0, nofLUTs):
+
+        # LUT input
+        localInputs = []
+        for i, a in enumerate(varsLUTInputSelection[lut]):
+            if varsLUTInputSelection[lut][a] in solution:
+                localInputs.append(a)
+
+        # LUT output
+        localOutputs = []
+        for i, a in enumerate(aigDefinitions):
+            if varsLUTSignalDefinition[lut][a] in solution:
+                localOutputs.append(a)
+
+        LUTLocalIO.append((localInputs, localOutputs))
+
+    # Clean the LUTs by output not actually needed
+    print("Preopt:",LUTLocalIO)
+    for lut in range(0, nofLUTs):
+        newOutput = []
+        for output in LUTLocalIO[lut][1]:
+            usedElsewhere = False
+            # Used in other LUT?
+            for otherLUT in range(lut+1,nofLUTs):
+                if output in LUTLocalIO[otherLUT][0]:
+                    usedElsewhere = True
+            # Primary output=
+            if output.startswith("uvwState"):
+                usedElsewhere = True
+            if usedElsewhere:
+                locations[output] = "(lut" + str(lut) + "output & " + str(1 << len(newOutput)) + ")"
+                newOutput.append(output)
+
+        LUTLocalIO[lut] = (LUTLocalIO[lut][0],newOutput)
+
     # Support check
     for lut in range(0,nofLUTs):
         if len([a for a in aigDefinitions if varsLUTSignalDefinition[lut][a] in solution])>32:
@@ -956,34 +997,90 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
         if livenessMonitoring and baseUVW.rejecting[i] and i > 0:  # No counter for the FASLE
             print("uint32_t cnt" + str(i) + " = 0;", file=outFile)
 
-    # LUT table declaration
+    # LUT TableslocalOutputs
     print("", file=outFile)
-    for lut in range(0, nofLUTs):
-        print("uint32_t lut"+str(lut)+"[];", file=outFile)
+    for lut in range(nofLUTs):
+        (localInputs,localOutputs) = LUTLocalIO[lut]
+
+        # Build LUT table
+        if len(localOutputs)<=8:
+            print("uint8_t ",file=outFile,end="")
+        elif len(localOutputs)<=16:
+            print("uint16_t ", file=outFile, end="")
+        else:
+            print("uint32_t ", file=outFile, end="")
+        print("lut"+str(lut)+"["+str(1 << len(localInputs))+"] = {", file=outFile,end="")
+        for lutInput in range(1 << len(localInputs)):
+            # print("LUT:",lut,lutInput)
+            assignments = {}
+            for i,a in enumerate(localInputs):
+                assignments[a] = (lutInput & (1 << i))>0
+            # Populate assignments
+            for aigNode in orderAIGNodes:
+                theseInputs = aigDefinitions[aigNode][0]
+                valueLines = aigDefinitions[aigNode][1]
+                allInputsSet = True
+                inputVector = ""
+                for a in theseInputs:
+                    if not a in assignments:
+                        allInputsSet = False
+                    else:
+                        if assignments[a]:
+                            inputVector = inputVector + "1"
+                        else:
+                            inputVector = inputVector + "0"
+                match = None
+                # print("INPUT:", inputVector,aigNode)
+                if allInputsSet:
+                    for line in valueLines:
+                        thisMatch = True
+                        for j,b in enumerate(inputVector):
+                            if line[j]!=inputVector[j] and line[j]!='-':
+                                thisMatch = False
+                        if thisMatch:
+                            if line[-1]=='1':
+                                match = True
+                            elif line[-1]=='0':
+                                match = False
+                            else:
+                                raise Exception("Can't parse BLIF line.")
+                    if match is None:
+                        # Default
+                        if valueLines[0][-1] == '1':
+                            match = False
+                        else:
+                            match = True
+                    assignments[aigNode] = match
+            # Ok, now compile the output
+            # print("Asign:",assignments)
+            overallValue = 0
+            for j,out in enumerate(localOutputs):
+                assert not assignments[out] is None # If this fails, then in the input BLIF file, the AIG nodes are not in topological order - all gates must only use inputs already defined.
+                if assignments[out]:
+                    overallValue += (1 << j)
+
+            # Printing
+            if (lutInput % 8)==0 and lutInput>0:
+                print("\n    ",end="",file=outFile)
+            print(hex(overallValue),end="",file=outFile)
+            if lutInput < (1 << len(localInputs))-1:
+                print(",",end="",file=outFile)
+        print("};",file=outFile)
 
     # Main monitoring function
     print("\nvoid monitorUpdate(uint32_t apValues) {", file=outFile)
 
     # Compute LUTs
-    locations = {}
-    for i,p in enumerate(propositions):
-        locations[p] = "(apValues & "+str(1 << i)+")"
-    for i, p in enumerate(baseUVW.stateNames):
-        locations["uvwState"+str(i)] = "uvwState"+str(i)
-
-    LUTLocalIO = []
     for lut in range(0,nofLUTs):
 
         # LUT input
         print("  uint32_t lut"+str(lut)+"input = ", file=outFile,end="")
         currentIndex = 0
-        localInputs = []
         for i,a in enumerate(varsLUTInputSelection[lut]):
             if varsLUTInputSelection[lut][a] in solution:
                 if currentIndex>0:
                     print(" + ", file=outFile,end="")
                 print("("+locations[a]+">0?"+str(1<<currentIndex)+":0)", file=outFile,end="")
-                localInputs.append(a)
                 currentIndex += 1
         if currentIndex==0:
             print("0",file=outFile,end="") # Special case - LUT not actually used.
@@ -991,15 +1088,7 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
 
         # LUT output
         print("  uint32_t lut" + str(lut) + "output = lut"+str(lut)+"[lut"+str(lut)+"input];", file=outFile)
-        currentIndex = 0
-        localOutputs = []
-        for i,a in enumerate(aigDefinitions):
-            if varsLUTSignalDefinition[lut][a] in solution:
-                locations[a] = "(lut" + str(lut) + "output & "+str(1 << currentIndex)+")"
-                localOutputs.append(a)
-                currentIndex += 1
 
-        LUTLocalIO.append((localInputs,localOutputs))
 
     for stateNum in range(len(baseUVW.stateNames)):
 
@@ -1075,70 +1164,6 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
     print("")
     print("}\n", file=outFile)
 
-    # LUT computation
-    for lut in range(nofLUTs):
-        (localInputs,localOutputs) = LUTLocalIO[lut]
-
-        # Build LUT table
-        print("uint32_t lut"+str(lut)+"["+str(1 << len(localInputs))+"] = {", file=outFile,end="")
-        for lutInput in range(1 << len(localInputs)):
-            # print("LUT:",lut,lutInput)
-            assignments = {}
-            for i,a in enumerate(localInputs):
-                assignments[a] = (lutInput & (1 << i))>0
-            # Populate assignments
-            for aigNode in orderAIGNodes:
-                theseInputs = aigDefinitions[aigNode][0]
-                valueLines = aigDefinitions[aigNode][1]
-                allInputsSet = True
-                inputVector = ""
-                for a in theseInputs:
-                    if not a in assignments:
-                        allInputsSet = False
-                    else:
-                        if assignments[a]:
-                            inputVector = inputVector + "1"
-                        else:
-                            inputVector = inputVector + "0"
-                match = None
-                # print("INPUT:", inputVector,aigNode)
-                if allInputsSet:
-                    for line in valueLines:
-                        thisMatch = True
-                        for j,b in enumerate(inputVector):
-                            if line[j]!=inputVector[j] and line[j]!='-':
-                                thisMatch = False
-                        if thisMatch:
-                            if line[-1]=='1':
-                                match = True
-                            elif line[-1]=='0':
-                                match = False
-                            else:
-                                raise Exception("Can't parse BLIF line.")
-                    if match is None:
-                        # Default
-                        if valueLines[0][-1] == '1':
-                            match = False
-                        else:
-                            match = True
-                    assignments[aigNode] = match
-            # Ok, now compile the output
-            # print("Asign:",assignments)
-            overallValue = 0
-            for j,out in enumerate(localOutputs):
-                assert not assignments[out] is None # If this fails, then in the input BLIF file, the AIG nodes are not in topological order - all gates must only use inputs already defined.
-                if assignments[out]:
-                    overallValue += (1 << j)
-
-            # Printing
-            if (lutInput % 8)==0 and lutInput>0:
-                print("\n    ",end="",file=outFile)
-            print(hex(overallValue),end="",file=outFile)
-            if lutInput < (1 << len(localInputs))-1:
-                print(",",end="",file=outFile)
-        print("};",file=outFile)
-
-
     # Add decoding information for the buffers:
     print("\n/* Decoding information for the buffers:", file=outFile)
     print("   -------------------------------------\n", file=outFile)
@@ -1169,8 +1194,8 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
     print("\n/* Lookup-Table contents:", file=outFile)
     for lut in range(0,nofLUTs):
         print("- LUT "+str(lut)+" has:", file=outFile)
-        print("  -> Inputs "+" ".join([a for a in varsLUTInputSelection[lut] if varsLUTInputSelection[lut][a] in solution]), file=outFile)
-        print("  -> Outputs " + " ".join([a for a in aigDefinitions if varsLUTSignalDefinition[lut][a] in solution]), file=outFile)
+        print("  -> Inputs "+" ".join(LUTLocalIO[lut][0]), file=outFile)
+        print("  -> Outputs " + " ".join(LUTLocalIO[lut][1]), file=outFile)
     print("*/",file=outFile)
 
 
@@ -1657,7 +1682,12 @@ if __name__ == '__main__':
     nextCompilerScript = False
     nextParetoLimit = False
     nextOutputFile = False
+    nextNOFLuts = False
+    nextInputsPerLUT = False
+
     monitorGenerationAlgorithm = "deterministic"
+    nofLUTs = None
+    nofInputsPerLUT = None
 
     for arg in args:
         if nextCompilerScript:
@@ -1669,6 +1699,12 @@ if __name__ == '__main__':
         elif nextOutputFile:
             outputFile = open(arg,"w")
             nextOutputFile = False
+        elif nextNOFLuts:
+            nextNOFLuts = False
+            nofLUTs = int(arg)
+        elif nextInputsPerLUT:
+            nextInputsPerLUT = False
+            nofInputsPerLUT = int(arg)
         elif arg.startswith("-"):
             if arg == "--debug":
                 PRINTDEBUGINFO = True
@@ -1686,6 +1722,10 @@ if __name__ == '__main__':
                 monitorGenerationAlgorithm = "nondeterministic"
             elif arg == "--aigBased":
                 monitorGenerationAlgorithm = "aig"
+            elif arg == "--nofLUTs":
+                nextNOFLuts = True
+            elif arg == "--nofInputsPerLUT":
+                nextInputsPerLUT = True
             else:
                 print("Error: Did not understand parameter: "+arg, file=sys.stderr)
                 sys.exit(1)
@@ -1707,11 +1747,14 @@ if __name__ == '__main__':
     if nextOutputFile:
         print("Error: '--outputFile' needs to be followed by an output File")
         sys.exit(1)
+    if nextNOFLuts or nextInputsPerLUT:
+        print("Error: next parameter expected.")
+        sys.exit(1)
 
     
     if paretoCompiler is None:
         (dfa,baseUVW,propositions,livenessMonitoring) = generateMonitor(inputFile,scriptBasePath,livenessMonitoring)
-        generateMonitorCode(dfa,baseUVW,propositions,livenessMonitoring,outputFile,monitorGenerationAlgorithm)
+        generateMonitorCode(dfa,baseUVW,propositions,livenessMonitoring,outputFile,monitorGenerationAlgorithm,nofLUTs,nofInputsPerLUT)
     else:
         (dfa,baseUVW,propositions,livenessMonitoring) = generateMonitor(inputFile,scriptBasePath,livenessMonitoring)
         paretoOptimize(baseUVW,propositions,livenessMonitoring,paretoCompiler,paretoLimit,monitorGenerationAlgorithm)
