@@ -30,7 +30,7 @@ jobs:
     - name: Update submodule.
       run: git submodule update --remote
     - name: Install various packages needed for compiling spot
-      run: sudo apt-get install latexmk texlive-latex-extra texlive-fonts-extra texlive-science pdf2svg
+      run: sudo apt-get update; sudo apt-get install latexmk texlive-latex-extra texlive-fonts-extra texlive-science pdf2svg
     - name: Get the dd library dependencies
       run: git clone https://github.com/tulip-control/dd; cd dd; python3 setup.py egg_info; pip install -r *.egg-info/requires.txt
     - name: Get the dd library
