@@ -29,6 +29,10 @@ jobs:
          submodules: recursive
     - name: Update submodule.
       run: git submodule update --remote
+    - name: Get Mockturtle
+      run: cd lib; git clone --branch lee30sonia/dont_care_view https://github.com/lsils/mockturtle.git
+    - name: Compile Mockturtle
+      run: cd lib; cd mockturtle; mkdir build; cd build; cmake ..; make exdc
     - name: Install various packages needed for compiling spot
       run: sudo apt-get update; sudo apt-get install latexmk texlive-latex-extra texlive-fonts-extra texlive-science pdf2svg
     - name: Get the dd library dependencies
