@@ -39,6 +39,8 @@ jobs:
       run: git clone https://github.com/tulip-control/dd; cd dd; python3 setup.py egg_info; pip install -r *.egg-info/requires.txt
     - name: Get the dd library
       run: pip3 install dd --install-option="--fetch" --install-option="--cudd"
+    - name: Get pysat
+      run: pip3 install python-sat
     - name: Get SPOT
       run: cd lib; git clone https://gitlab.lrde.epita.fr/spot/spot.git; cd spot; git checkout edfcd5b0d8f3862c7eebb3adbd035ba84df7d753; autoreconf -i; ./configure --disable-devel; make
     - name: Install qmake
