@@ -28,85 +28,75 @@ uint32_t cnt2 = 0;
 uint32_t cnt3 = 0;
 uint32_t cnt4 = 0;
 
-uint16_t lut0[32] = {0x0,0x0,0x0,0x0,0x18,0x18,0x0,0x18,
-    0x23,0x21,0x0,0x23,0x3b,0x39,0x0,0x3b,
-    0xfd0,0xff4,0xfd0,0xfd0,0xfd8,0xffc,0xfd0,0xfd8,
-    0xff3,0xff5,0xfd0,0xff3,0xffb,0xffd,0xfd0,0xffb};
-uint8_t lut1[32] = {0x0,0x1,0x0,0x0,0xc,0xd,0x0,0xc,
-    0x22,0x23,0x0,0x22,0x2e,0x2f,0x0,0x2e,
-    0x8,0x39,0x8,0x8,0xc,0x3d,0x8,0xc,
-    0x2a,0x3b,0x8,0x2a,0x2e,0x3f,0x8,0x2e};
-uint8_t lut2[32] = {0x0,0x1,0x2,0x0,0xc,0xd,0x2,0xc,
-    0x0,0x1,0x2,0x0,0xc,0xd,0x2,0xc,
-    0x8,0x19,0xa,0x8,0xc,0x1d,0xa,0xc,
-    0x8,0x19,0xa,0x8,0xc,0x1d,0xa,0xc};
-uint8_t lut3[32] = {0x0,0x0,0x0,0x0,0x18,0x18,0x0,0x18,
-    0x23,0x21,0x0,0x23,0x3b,0x39,0x0,0x3b,
-    0x10,0x34,0x10,0x10,0x18,0x3c,0x10,0x18,
-    0x33,0x35,0x10,0x33,0x3b,0x3d,0x10,0x3b};
-uint8_t lut4[32] = {0x4,0xb,0x0,0xb,0x4,0xd,0x0,0x9,
-    0x4,0x4,0x0,0x0,0x4,0x4,0x0,0x0,
-    0xc,0xb,0x8,0xb,0xc,0xd,0x8,0x9,
-    0xc,0xc,0x8,0x8,0xc,0xc,0x8,0x8};
-uint8_t lut5[32] = {0x0,0x0,0x1,0x0,0x0,0x0,0x1,0x0,
-    0x0,0x2,0x1,0x2,0x2,0x2,0x3,0x2,
-    0x0,0x2,0x1,0x2,0x2,0x2,0x3,0x2,
-    0x0,0x2,0x1,0x2,0x2,0x2,0x3,0x2};
-uint8_t lut6[32] = {0x1,0x3,0x1,0x3,0x1,0x3,0x1,0x3,
-    0x1,0x3,0x1,0x3,0x1,0x3,0x1,0x3,
-    0x0,0x3,0x1,0x3,0x1,0x3,0x1,0x3,
-    0x1,0x3,0x1,0x3,0x1,0x3,0x1,0x3};
+uint32_t lut0[32] = {0x30ff0,0x36ff1,0x30ff2,0x30ff0,0x38ff0,0x3eff1,0x38ff2,0x38ff0,
+    0x30ff0,0x36ff1,0x30ff2,0x30ff0,0x30ff0,0x36ff1,0x30ff2,0x30ff0,
+    0x35ffc,0x37ff1,0x30ff2,0x35ffc,0x3dffc,0x3fff1,0x38ff2,0x3dffc,
+    0x35ffc,0x37ff1,0x30ff2,0x35ffc,0x35ffc,0x37ff1,0x30ff2,0x35ffc};
+uint8_t lut1[16] = {0x0,0x61,0x0,0x0,0x8,0x69,0x0,0x8,
+    0x56,0x71,0x0,0x56,0x5e,0x79,0x0,0x5e};
+uint8_t lut2[32] = {0x2,0x20,0x2,0x2,0xa,0x28,0x2,0xa,
+    0x37,0x30,0x2,0x37,0x3f,0x38,0x2,0x3f,
+    0x0,0x20,0x0,0x0,0x8,0x28,0x0,0x8,
+    0x35,0x30,0x0,0x35,0x3d,0x38,0x0,0x3d};
+uint8_t lut3[32] = {0x2,0x68,0x3,0x2,0x54,0x78,0x3,0x54,
+    0x8,0x68,0x9,0x8,0x5c,0x78,0x9,0x5c,
+    0x2,0x62,0x3,0x2,0x54,0x72,0x3,0x54,
+    0x2,0x62,0x3,0x2,0x54,0x72,0x3,0x54};
+uint8_t lut4[16] = {0x0,0x1,0x2,0x3,0x0,0x0,0x2,0x2,
+    0x0,0x1,0x0,0x1,0x0,0x0,0x0,0x0};
+uint8_t lut5[32] = {0x2,0x3,0x2,0x3,0x2,0x3,0x2,0x3,
+    0x2,0x3,0x2,0x3,0x2,0x3,0x2,0x3,
+    0x0,0x3,0x2,0x3,0x2,0x3,0x2,0x3,
+    0x2,0x3,0x2,0x3,0x2,0x3,0x2,0x3};
 
 void monitorUpdate(uint32_t apValues) {
-  uint32_t lut0input = ((apValues & 64)>0?1:0) + ((apValues & 128)>0?2:0) + (uvwState4>0?4:0) + (uvwState8>0?8:0) + (uvwState9>0?16:0);
+  uint32_t lut0input = ((apValues & 4)>0?1:0) + ((apValues & 8)>0?2:0) + ((apValues & 16)>0?4:0) + ((apValues & 32)>0?8:0) + (uvwState6>0?16:0);
   uint32_t lut0output = lut0[lut0input];
-  uint32_t lut1input = ((apValues & 1)>0?1:0) + ((apValues & 2)>0?2:0) + (uvwState1>0?4:0) + (uvwState5>0?8:0) + (uvwState9>0?16:0);
+  uint32_t lut1input = ((apValues & 1)>0?1:0) + ((apValues & 2)>0?2:0) + (uvwState1>0?4:0) + (uvwState5>0?8:0);
   uint32_t lut1output = lut1[lut1input];
-  uint32_t lut2input = ((apValues & 16)>0?1:0) + ((apValues & 32)>0?2:0) + (uvwState3>0?4:0) + (uvwState6>0?8:0) + (uvwState9>0?16:0);
+  uint32_t lut2input = ((apValues & 16)>0?1:0) + ((apValues & 32)>0?2:0) + (uvwState3>0?4:0) + (uvwState7>0?8:0) + ((lut1output & 1)>0?16:0);
   uint32_t lut2output = lut2[lut2input];
-  uint32_t lut3input = ((apValues & 4)>0?1:0) + ((apValues & 8)>0?2:0) + (uvwState2>0?4:0) + (uvwState6>0?8:0) + (uvwState9>0?16:0);
+  uint32_t lut3input = ((apValues & 64)>0?1:0) + ((apValues & 128)>0?2:0) + (uvwState8>0?4:0) + ((lut0output & 1)>0?8:0) + ((lut2output & 2)>0?16:0);
   uint32_t lut3output = lut3[lut3input];
-  uint32_t lut4input = (uvwState7>0?1:0) + ((lut3output & 2)>0?2:0) + ((lut2output & 1)>0?4:0) + ((lut2output & 2)>0?8:0) + ((lut2output & 16)>0?16:0);
+  uint32_t lut4input = (uvwState2>0?1:0) + (uvwState4>0?2:0) + ((lut0output & 2)>0?4:0) + ((lut3output & 1)>0?8:0);
   uint32_t lut4output = lut4[lut4input];
-  uint32_t lut5input = ((lut1output & 1)>0?1:0) + ((lut1output & 2)>0?2:0) + ((lut2output & 1)>0?4:0) + ((lut3output & 4)>0?8:0) + ((lut0output & 4)>0?16:0);
+  uint32_t lut5input = (uvwState0>0?1:0) + ((lut1output & 2)>0?2:0) + ((lut0output & 4)>0?4:0) + ((lut2output & 1)>0?8:0) + ((lut3output & 2)>0?16:0);
   uint32_t lut5output = lut5[lut5input];
-  uint32_t lut6input = (uvwState0>0?1:0) + ((lut5output & 1)>0?2:0) + ((lut0output & 2)>0?4:0) + ((lut5output & 2)>0?8:0) + ((lut4output & 4)>0?16:0);
-  uint32_t lut6output = lut6[lut6input];
-  if ((lut6output & 2)) {
+  if ((lut5output & 1)) {
     logViolationExplanation(0,&(buf.b0p0),4);
-  } else if ((lut5output & 1)) {
+  } else if ((lut1output & 4)) {
     buf.b0p0 = buf.b5p0 | (apValues << 9) | (0 << 18);
     logViolationExplanation(0,&(buf.b0p0),4);
-  } else if ((lut3output & 2)) {
+  } else if ((lut0output & 8)) {
     buf.b0p0 = buf.b6p0 | (apValues << 9) | (1 << 18);
     logViolationExplanation(0,&(buf.b0p0),4);
-  } else if ((lut4output & 2)) {
+  } else if ((lut2output & 4)) {
     buf.b0p0 = buf.b7p0 | (apValues << 9) | (2 << 18);
     logViolationExplanation(0,&(buf.b0p0),4);
-  } else if ((lut0output & 2)) {
+  } else if ((lut3output & 4)) {
     buf.b0p0 = buf.b8p0 | (apValues << 9) | (3 << 18);
     logViolationExplanation(0,&(buf.b0p0),4);
-  } else if ((lut5output & 2)) {
+  } else if ((lut3output & 8)) {
     buf.b0p0 = b9p0 | (apValues << 9) | (4 << 18);
     logViolationExplanation(0,&(buf.b0p0),4);
   }
-  if ((lut1output & 4)) {
+  if ((lut1output & 8)) {
     cnt1++;
     if ((cnt1 & FREQUENCY_MASK_STARVATION_LOGGING)==0) {
       logLivenessStarvation(1,cnt1, &buf.b1p0,1);
     }
-  } else if ((lut0output & 64)) {
+  } else if ((lut0output & 16)) {
     buf.b1p0 = b9p0 | (apValues << 0);
   }
-  if ((lut3output & 8)) {
+  if ((lut4output & 1)) {
     cnt2++;
     if ((cnt2 & FREQUENCY_MASK_STARVATION_LOGGING)==0) {
       logLivenessStarvation(2,cnt2, &buf.b2p0,1);
     }
-  } else if ((lut0output & 128)) {
+  } else if ((lut0output & 64)) {
     buf.b2p0 = b9p0 | (apValues << 0);
   }
-  if ((lut2output & 4)) {
+  if ((lut2output & 8)) {
     cnt3++;
     if ((cnt3 & FREQUENCY_MASK_STARVATION_LOGGING)==0) {
       logLivenessStarvation(3,cnt3, &buf.b3p0,1);
@@ -114,42 +104,42 @@ void monitorUpdate(uint32_t apValues) {
   } else if ((lut0output & 256)) {
     buf.b3p0 = b9p0 | (apValues << 0);
   }
-  if ((lut0output & 8)) {
+  if ((lut4output & 2)) {
     cnt4++;
     if ((cnt4 & FREQUENCY_MASK_STARVATION_LOGGING)==0) {
       logLivenessStarvation(4,cnt4, &buf.b4p0,1);
     }
-  } else if ((lut0output & 512)) {
+  } else if ((lut0output & 1024)) {
     buf.b4p0 = b9p0 | (apValues << 0);
   }
-  if ((lut1output & 2)) {
-  } else if ((lut1output & 16)) {
+  if ((lut1output & 16)) {
+  } else if ((lut1output & 32)) {
     buf.b5p0 = b9p0 | (apValues << 0);
   }
-  if ((lut3output & 1)) {
-  } else if ((lut3output & 4)) {
+  if ((lut0output & 4096)) {
+  } else if ((lut0output & 8192)) {
     buf.b6p0 = b9p0 | (apValues << 0);
   }
-  if ((lut4output & 1)) {
-  } else if ((lut2output & 16)) {
+  if ((lut2output & 16)) {
+  } else if ((lut0output & 32768)) {
     buf.b7p0 = b9p0 | (apValues << 0);
   }
-  if ((lut0output & 1)) {
-  } else if ((lut0output & 4)) {
+  if ((lut3output & 16)) {
+  } else if ((lut3output & 32)) {
     buf.b8p0 = b9p0 | (apValues << 0);
   }
-  if ((lut0output & 1024)) {
+  if ((lut0output & 65536)) {
   }
-  uvwState0 = ((lut6output & 1))>0?1:0;
-  uvwState1 = ((lut1output & 8))>0?1:0;
-  uvwState2 = ((lut3output & 16))>0?1:0;
-  uvwState3 = ((lut2output & 8))>0?1:0;
-  uvwState4 = ((lut0output & 16))>0?1:0;
-  uvwState5 = ((lut1output & 32))>0?1:0;
-  uvwState6 = ((lut3output & 32))>0?1:0;
-  uvwState7 = ((lut4output & 8))>0?1:0;
-  uvwState8 = ((lut0output & 32))>0?1:0;
-  uvwState9 = ((lut0output & 2048))>0?1:0;
+  uvwState0 = ((lut5output & 2))>0?1:0;
+  uvwState1 = ((lut0output & 32))>0?1:0;
+  uvwState2 = ((lut0output & 128))>0?1:0;
+  uvwState3 = ((lut0output & 512))>0?1:0;
+  uvwState4 = ((lut0output & 2048))>0?1:0;
+  uvwState5 = ((lut1output & 64))>0?1:0;
+  uvwState6 = ((lut0output & 16384))>0?1:0;
+  uvwState7 = ((lut2output & 32))>0?1:0;
+  uvwState8 = ((lut3output & 64))>0?1:0;
+  uvwState9 = ((lut0output & 131072))>0?1:0;
 }
 
 
@@ -225,24 +215,21 @@ UVW on which the monitor is based:
 
 /* Lookup-Table contents:
 - LUT 0 has:
-  -> Inputs d1 d2 uvwState4 uvwState8 uvwState9
-  -> Outputs uvwState8incoming0 uvwState0incoming4 uvwState8incoming1 uvwState4incoming0 uvwState4Next uvwState8Next uvwState1incoming1 uvwState2incoming1 uvwState3incoming1 uvwState4incoming1 uvwState9incoming0 uvwState9Next
+  -> Inputs b1 b2 c1 c2 uvwState6
+  -> Outputs new_n24 new_n25 new_n27 uvwState0incoming2 uvwState1incoming1 uvwState1Next uvwState2incoming1 uvwState2Next uvwState3incoming1 uvwState3Next uvwState4incoming1 uvwState4Next uvwState6incoming0 uvwState6incoming1 uvwState6Next uvwState7incoming1 uvwState9incoming0 uvwState9Next
 - LUT 1 has:
-  -> Inputs a1 a2 uvwState1 uvwState5 uvwState9
-  -> Outputs new_n53_ uvwState5incoming0 uvwState1incoming0 uvwState1Next uvwState5incoming1 uvwState5Next
+  -> Inputs a1 a2 uvwState1 uvwState5
+  -> Outputs new_n22 new_n23 uvwState0incoming1 uvwState1incoming0 uvwState5incoming0 uvwState5incoming1 uvwState5Next
 - LUT 2 has:
-  -> Inputs c1 c2 uvwState3 uvwState6 uvwState9
-  -> Outputs new_n61_ new_n62_ uvwState3incoming0 uvwState3Next uvwState7incoming1
+  -> Inputs c1 c2 uvwState3 uvwState7 new_n22
+  -> Outputs new_n31 new_n36 uvwState0incoming3 uvwState3incoming0 uvwState7incoming0 uvwState7Next
 - LUT 3 has:
-  -> Inputs b1 b2 uvwState2 uvwState6 uvwState9
-  -> Outputs uvwState6incoming0 uvwState0incoming2 uvwState6incoming1 uvwState2incoming0 uvwState2Next uvwState6Next
+  -> Inputs d1 d2 uvwState8 new_n24 new_n36
+  -> Outputs new_n33 new_n39 uvwState0incoming4 uvwState0incoming5 uvwState8incoming0 uvwState8incoming1 uvwState8Next
 - LUT 4 has:
-  -> Inputs uvwState7 uvwState0incoming2 new_n61_ new_n62_ uvwState7incoming1
-  -> Outputs uvwState7incoming0 uvwState0incoming3 new_n75_ uvwState7Next
+  -> Inputs uvwState2 uvwState4 new_n25 new_n33
+  -> Outputs uvwState2incoming0 uvwState4incoming0
 - LUT 5 has:
-  -> Inputs new_n53_ uvwState5incoming0 new_n61_ uvwState6incoming1 uvwState8incoming1
-  -> Outputs uvwState0incoming1 uvwState0incoming5
-- LUT 6 has:
-  -> Inputs uvwState0 uvwState0incoming1 uvwState0incoming4 uvwState0incoming5 new_n75_
-  -> Outputs uvwState0Next uvwState0incoming0
+  -> Inputs uvwState0 new_n23 new_n27 new_n31 new_n39
+  -> Outputs uvwState0incoming0 uvwState0Next
 */
