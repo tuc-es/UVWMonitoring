@@ -68,6 +68,18 @@ uint32_t currentAPValues = 0; // Atomic propositions for monitoring;
 // Bits 6-7: Fourth traffic light
 // Bits   8: Button A
 
+void currentAPsTOUART(uint32_t currentAPs) {
+  /*
+    void currentAPsTOUART(uint32_t currentAPs);
+    currentAPsTOUART(apValues);
+
+  */
+  char text[256];
+  snprintf(text,256,"Monitor input %d\n",(int)currentAPs);
+  HAL_UART_Transmit(&huart2,(uint8_t*)text,strlen(text),10000);
+
+}
+
 void logViolationExplanation(uint32_t dfaState,void *violationBuffer,uint32_t sizeBuffer) {
   char text[256];
   snprintf(text,256,"Violation in DFA state %d %d ",(int)dfaState,(int)sizeBuffer);
@@ -82,6 +94,7 @@ void logViolationExplanation(uint32_t dfaState,void *violationBuffer,uint32_t si
   text[pos] = '\n';
   text[pos+1] = 0;
   HAL_UART_Transmit(&huart2,(uint8_t*)text,strlen(text),10000);
+  //while(1) {}; // Block.
 }
 
 

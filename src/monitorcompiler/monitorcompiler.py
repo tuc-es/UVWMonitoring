@@ -359,6 +359,7 @@ def pickCNFOrDNFWhateverIsShorter(cnfLabel,dnfLabel,outFile, varNames):
 def generateMonitorCodeNondeterministic(dfa,baseUVW,propositions,livenessMonitoring,outFile):
 
     # Prepare BDD variables and their compiled names
+    baseUVW_string_rep = str(baseUVW)
     allBDDVarNames = list(propositions)
     bddVariables = [baseUVW.ddMgr.add_expr(a) for a in propositions]
     for stateNum in range(len(baseUVW.stateNames)):
@@ -601,7 +602,7 @@ def generateMonitorCodeNondeterministic(dfa,baseUVW,propositions,livenessMonitor
                           file=outFile)
 
     print("\n", file=outFile)
-    print("UVW on which the monitor is based:\n", baseUVW, file=outFile)
+    print("UVW on which the monitor is based:\n", baseUVW_string_rep, file=outFile)
 
     print("*/", file=outFile)
 
@@ -611,6 +612,7 @@ def generateMonitorCodeNondeterministic(dfa,baseUVW,propositions,livenessMonitor
 def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outFile,nofLUTs,nofInputsPerLUT):
 
     # Prepare BDD variables and their compiled names
+    baseUVW_string_rep = str(baseUVW)
     allBDDVarNames = list(propositions)
     bddVariables = [baseUVW.ddMgr.add_expr(a) for a in propositions]
     for stateNum in range(len(baseUVW.stateNames)):
@@ -850,7 +852,10 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
 
         # Mockturtle preparation - Optimize using ABC
         shutil.copyfile(os.path.join(scriptPath,"../../lib/abc/abc.rc"),os.path.join(tempDir,"abc.rc"))
-        assert os.system("../../lib/abc/abc -c \"read test.blif; resyn2; write test.blif; read testDC.blif; resyn2; write testDC.blif\"")==0
+        shutil.copyfile(os.path.join(scriptPath,"../../lib/abc/abc"),os.path.join(tempDir,"abc"))
+        shutil.copymode(os.path.join(scriptPath,"../../lib/abc/abc"),os.path.join(tempDir,"abc"))
+        
+        assert os.system("cd "+str(tempDir)+"; ./abc -c \"read test.blif; resyn2; write test.blif; read testDC.blif; resyn2; write testDC.blif\"")==0
 
         # Mockturtle
         shutil.copyfile(os.path.join(scriptPath,"../../lib/mockturtle/build/examples/exdc"),os.path.join(tempDir,"exdc"))
@@ -904,7 +909,7 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
         # Encode optimization problem for multi-output LUT generation as PySAT instance
         # =============================================================================
         from pysat.formula import CNF, IDPool
-        from pysat.solvers import Lingeling
+        from pysat.solvers import Cadical
         from pysat.card import CardEnc, EncType
 
         # Define solution variables
@@ -961,13 +966,13 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
 
         formula.to_file(os.path.join(tempDir,"test.cnf"))
 
-        print("Running lingeling on:",os.path.join(tempDir,"test.cnf"))
-        with Lingeling(bootstrap_with=formula.clauses) as l:
+        print("Running cadical on:",os.path.join(tempDir,"test.cnf"))
+        with Cadical(bootstrap_with=formula.clauses) as l:
             if l.solve() == False:
                 raise Exception("No solution.")
             else:
                 # Get solution
-                solution = l.get_model()
+                solution = set(l.get_model())
         print("Execution finished.")
 
         # Compute representation of LUTs
@@ -1182,30 +1187,49 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
                     assert indexIncomingTransition != -1
 
                     # Low bits
-                    for index in range(0, bufferSizesInBits[fromState] // 32):
-                        print("    " + bufferVarNames[(stateNum, index)] + " = " + bufferVarNames[
-                            (fromState, index)] + +";", file=outFile)
-                    # Cases
-                    if ((bufferSizesInBits[fromState] % 32) < (bufferSizesInBits[stateNum] % 32)) or ((bufferSizesInBits[toUVW] % 32) == 0):
+                    fromUVW = fromState
+                    toUVW = stateNum
+                    for index in range(0, bufferSizesInBits[fromUVW] // 32):
+                        print("        " + bufferVarNames[(toUVW, index)] + " = " + bufferVarNames[
+                            (fromUVW, index)] + +";", file=outFile)
+                    
+                    if fullmod32(bufferSizesInBits[fromUVW]) < fullmod32(bufferSizesInBits[toUVW]):
                         # Simple case: appending all to the same part
-                        wordIndex = bufferSizesInBits[fromState] // 32
+                        wordIndex = bufferSizesInBits[fromUVW] // 32
+                        assert len(propositions)>0
                         # Copy part
                         # TODO: This fails for large specs. Index computations do not seem to be correct.
-                        print("    " + bufferVarNames[(stateNum, wordIndex)] + " = " +
-                              bufferVarNames[(fromState, wordIndex)], end="", file=outFile)
+                        print("        " + bufferVarNames[(toUVW, wordIndex)] + " = " +
+                              bufferVarNames[(fromUVW, wordIndex)], end="", file=outFile)
                         # Add proposition values
                         print(" | (apValues << " + str(
-                            (bufferSizesInBits[stateNum] % 32) - nofBitsIncomingTransitions[
-                                stateNum] - len(propositions)) + ")", end="", file=outFile)
+                            fullmod32(bufferSizesInBits[toUVW]) - nofBitsIncomingTransitions[
+                                toUVW] - len(propositions)) + ")", end="", file=outFile)
 
                         # Add source
-                        if nofBitsIncomingTransitions[stateNum] > 0:
+                        if nofBitsIncomingTransitions[toUVW] > 0:
                             print(" | (" + str(indexIncomingTransition) + " << " + str(
-                                (bufferSizesInBits[stateNum] % 32) - nofBitsIncomingTransitions[
-                                    stateNum]) + ")", end="", file=outFile)
+                                fullmod32(bufferSizesInBits[toUVW]) - nofBitsIncomingTransitions[
+                                    toUVW]) + ")", end="", file=outFile)
                         print(";", file=outFile)
                     else:
-                        raise Exception("This case is currently unimplemented.")
+                        wordIndexFrom = bufferSizesInBits[fromUVW] // 32
+                        print("        uint32_t addedInformation = "+str(indexIncomingTransition)+" + (apValues << "+str(nofBitsIncomingTransitions[toUVW])+");", file=outFile)
+                        nofAddedBits = len(propositions)+nofBitsIncomingTransitions[toUVW]
+                        assert(nofAddedBits<=32) # Otherwise spec is too big. 
+                        
+                        print("        " + bufferVarNames[(toUVW, wordIndexFrom)] + " = " +
+                              bufferVarNames[(fromUVW, wordIndexFrom)], end="", file=outFile)
+                        print(" | (addedInformation << " + str(
+                            32+(bufferSizesInBits[toUVW] % 32)- nofBitsIncomingTransitions[
+                                toUVW] - len(propositions))+")", end=";\n", file=outFile)
+                            
+                        # Start next buffer content
+                        remainingBits = bufferSizesInBits[toUVW] % 32
+                        print("        " + bufferVarNames[(toUVW, wordIndexFrom+1)] + " = addedInformation >> "+str(len(propostions)+nofBitsIncomingTransitions[toUVW] - remainingBits)+";", end="\n", file=outFile)
+                        outFile.flush()
+                    
+                        raise Exception("This case is currently untested.")
 
                 else:
                     # Counter increase
@@ -1232,28 +1256,28 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
         print("}\n", file=outFile)
 
         # Add decoding information for the buffers:
-        print("\n/* Decoding information for the buffers:", file=outFile)
+        print("/* Decoding information for the buffers:", file=outFile)
         print("   -------------------------------------\n", file=outFile)
         for i in range(0, len(baseUVW.stateNames)):
             print(" - UVW state " + str(i) + " with LTL subformula (Polish notation):", file=outFile)
             if bufferSizesInBits[i] == 0:
                 print("    Initial state only", file=outFile)
             else:
-                if (bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i] - len(propositions) > 0:
-                    print("    Bits 0 to " + str((bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i] - len(
+                if (bufferSizesInBits[i] - nofBitsIncomingTransitions[i] - len(propositions)) > 0:
+                    print("    Bits 0 to " + str(bufferSizesInBits[i] - nofBitsIncomingTransitions[i] - len(
                         propositions) - 1) + ": previous buffer", file=outFile)
                 print("    Bits " + str(
-                    (bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i] - len(propositions)) + " to " + str(
-                    (bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i] - 1) + ": propositions", file=outFile)
+                    bufferSizesInBits[i] - nofBitsIncomingTransitions[i] - len(propositions)) + " to " + str(
+                    bufferSizesInBits[i] - nofBitsIncomingTransitions[i] - 1) + ": propositions", file=outFile)
                 if nofBitsIncomingTransitions[i] > 0:
-                    print("    Bits " + str((bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i]) + " to " + str(
-                        (bufferSizesInBits[i] % 32) - 1) + ": incoming transition", file=outFile)
+                    print("    Bits " + str(bufferSizesInBits[i] - nofBitsIncomingTransitions[i]) + " to " + str(
+                        bufferSizesInBits[i] - 1) + ": incoming transition", file=outFile)
                     for transitionIndex, (ls, ll) in enumerate(incomingTransitionsUVWExceptForSelfLoops[i]):
                         print("       -> Value " + str(transitionIndex) + " for transition from UVW state " + str(ls),
                               file=outFile)
 
         print("\n", file=outFile)
-        print("UVW on which the monitor is based:\n", baseUVW, file=outFile)
+        print("UVW on which the monitor is based:\n", baseUVW_string_rep, file=outFile)
 
         print("*/", file=outFile)
 
