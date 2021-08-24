@@ -118,6 +118,10 @@ char text[256];
 }
 
 
+// Counting cycles
+uint32_t cyclesHighValues = 0;
+uint32_t cyclesInMonitor = 0;
+
 
 void updateButtonAPs() {
   if (GPIOA->IDR & 2) {
@@ -222,6 +226,8 @@ void displayNum(uint16_t num) {
 const uint8_t trafficSegMap [] = {0xff-80, 64+128, 130, 0x99 ,0xff-64};
 
 
+uint32_t lastModes = 0xFFFFFFFF;
+
 void displayTL(uint8_t *modes) {
   for (uint8_t i=0;i<4;i++) {
     WRITE_PIN_DISP_CS(GPIO_PIN_RESET);
@@ -234,7 +240,16 @@ void displayTL(uint8_t *modes) {
     displayShiftOut(segsel[i]);
     WRITE_PIN_DISP_CS(GPIO_PIN_SET);
   }
-  monitorUpdate(currentAPValues);
+
+  // Run monitor only on change
+  if (*((uint32_t*)modes)!=lastModes) {
+    lastModes = *((uint32_t*)modes);
+    uint32_t timerOld = TIM2->CNT + cyclesHighValues;
+    monitorUpdate(currentAPValues);
+    uint32_t deltaT = TIM2->CNT + cyclesHighValues - timerOld;
+    cyclesInMonitor += deltaT;
+  }
+
 }
 
 
@@ -277,6 +292,14 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+
+
+  // Init Timer IRQ
+  HAL_TIM_Base_Start(&htim2);
+  HAL_TIM_Base_Start_IT(&htim2);
+
+
+
   uint8_t modes[4] = {0,0,0,0};
   setLEDs(0);
 
@@ -301,6 +324,16 @@ int main(void)
 
 
     }
+
+
+    // New timing info...
+    {
+      char text[256];
+      snprintf(text,256,"Timing info: %d %d\n",(int)(cyclesHighValues+TIM2->CNT),(int)cyclesInMonitor);
+      HAL_UART_Transmit(&huart2,(uint8_t*)text,strlen(text),10000);
+    }
+
+
     lastTick = HAL_GetTick();
 
     switch(currentMode) {
