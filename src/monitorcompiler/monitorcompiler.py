@@ -11,6 +11,14 @@ PRINTDEBUGINFO = False
 # Location of the script
 scriptPath = os.path.dirname(sys.argv[0])
 
+# ==========================================
+# FullMod32 function - Returns values between (including) 1 and 32, except for values <= 0.
+# Used for buffer index calculation
+# ==========================================
+def fullmod32(inVal):
+    if inVal<=0:
+        return inVal
+    return ((inVal-1) % 32)+1
 
 # ==========================================
 # BDD to CNF functions
@@ -415,6 +423,7 @@ def generateMonitorCodeNondeterministic(dfa,baseUVW,propositions,livenessMonitor
     print("struct bufType {", file=outFile)
     bufferVarNames = {}
     initParts = []
+    print("XXXX",bufferSizesInWords,bufferSizesInBits)
     for i, a in enumerate(bufferSizesInWords):
         for j in range(a):
             bufferVarNames[(i, j)] = "buf.b" + str(i) + "p" + str(j);
@@ -505,27 +514,44 @@ def generateMonitorCodeNondeterministic(dfa,baseUVW,propositions,livenessMonitor
                     for index in range(0, bufferSizesInBits[fromUVW] // 32):
                         print("        " + bufferVarNames[(toUVW, index)] + " = " + bufferVarNames[
                             (fromUVW, index)] + +";", file=outFile)
-                    # Cases
-                    if ((bufferSizesInBits[fromUVW] % 32) < (bufferSizesInBits[toUVW] % 32)):
+                    
+                    if fullmod32(bufferSizesInBits[fromUVW]) < fullmod32(bufferSizesInBits[toUVW]):
                         # Simple case: appending all to the same part
-                        wordIndex = bufferSizesInBits[toUVW] // 32
+                        wordIndex = bufferSizesInBits[fromUVW] // 32
+                        assert len(propositions)>0
                         # Copy part
                         # TODO: This fails for large specs. Index computations do not seem to be correct.
                         print("        " + bufferVarNames[(toUVW, wordIndex)] + " = " +
                               bufferVarNames[(fromUVW, wordIndex)], end="", file=outFile)
                         # Add proposition values
                         print(" | (apValues << " + str(
-                            (bufferSizesInBits[toUVW] % 32) - nofBitsIncomingTransitions[
+                            fullmod32(bufferSizesInBits[toUVW]) - nofBitsIncomingTransitions[
                                 toUVW] - len(propositions)) + ")", end="", file=outFile)
 
                         # Add source
                         if nofBitsIncomingTransitions[toUVW] > 0:
                             print(" | (" + str(indexIncomingTransition) + " << " + str(
-                                (bufferSizesInBits[toUVW] % 32) - nofBitsIncomingTransitions[
+                                fullmod32(bufferSizesInBits[toUVW]) - nofBitsIncomingTransitions[
                                     toUVW]) + ")", end="", file=outFile)
                         print(";", file=outFile)
                     else:
-                        raise Exception("This case is currently unimplemented.")
+                        wordIndexFrom = bufferSizesInBits[fromUVW] // 32
+                        print("        uint32_t addedInformation = "+str(indexIncomingTransition)+" + (apValues << "+str(nofBitsIncomingTransitions[toUVW])+");", file=outFile)
+                        nofAddedBits = len(propositions)+nofBitsIncomingTransitions[toUVW]
+                        assert(nofAddedBits<=32) # Otherwise spec is too big. 
+                        
+                        print("        " + bufferVarNames[(toUVW, wordIndexFrom)] + " = " +
+                              bufferVarNames[(fromUVW, wordIndexFrom)], end="", file=outFile)
+                        print(" | (addedInformation << " + str(
+                            32+(bufferSizesInBits[toUVW] % 32)- nofBitsIncomingTransitions[
+                                toUVW] - len(propositions))+")", end=";\n", file=outFile)
+                            
+                        # Start next buffer content
+                        remainingBits = bufferSizesInBits[toUVW] % 32
+                        print("        " + bufferVarNames[(toUVW, wordIndexFrom+1)] + " = addedInformation >> "+str(len(propostions)+nofBitsIncomingTransitions[toUVW] - remainingBits)+";", end="\n", file=outFile)
+                        outFile.flush()
+                    
+                        raise Exception("This case is currently untested.")
 
                     print("      }", file=outFile)
 
@@ -561,15 +587,15 @@ def generateMonitorCodeNondeterministic(dfa,baseUVW,propositions,livenessMonitor
         if bufferSizesInBits[i] == 0:
             print("    Initial state only", file=outFile)
         else:
-            if (bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i] - len(propositions) > 0:
-                print("    Bits 0 to " + str((bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i] - len(
+            if (bufferSizesInBits[i] - nofBitsIncomingTransitions[i] - len(propositions)) > 0:
+                print("    Bits 0 to " + str(bufferSizesInBits[i] - nofBitsIncomingTransitions[i] - len(
                     propositions) - 1) + ": previous buffer", file=outFile)
             print("    Bits " + str(
-                (bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i] - len(propositions)) + " to " + str(
-                (bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i] - 1) + ": propositions", file=outFile)
+                bufferSizesInBits[i] - nofBitsIncomingTransitions[i] - len(propositions)) + " to " + str(
+                bufferSizesInBits[i] - nofBitsIncomingTransitions[i] - 1) + ": propositions", file=outFile)
             if nofBitsIncomingTransitions[i] > 0:
-                print("    Bits " + str((bufferSizesInBits[i] % 32) - nofBitsIncomingTransitions[i]) + " to " + str(
-                    (bufferSizesInBits[i] % 32) - 1) + ": incoming transition", file=outFile)
+                print("    Bits " + str(bufferSizesInBits[i] - nofBitsIncomingTransitions[i]) + " to " + str(
+                    bufferSizesInBits[i] - 1) + ": incoming transition", file=outFile)
                 for transitionIndex, (ls, ll) in enumerate(incomingTransitionsUVWExceptForSelfLoops[i]):
                     print("       -> Value " + str(transitionIndex) + " for transition from UVW state " + str(ls),
                           file=outFile)
@@ -626,7 +652,9 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
         for stateNum in range(len(baseUVW.stateNames)):
             reachable = baseUVW.ddMgr.exist(["uvwState"+str(stateNum)], reachable)
         replaceDict = {"uvwState"+str(a)+"post" : "uvwState"+str(a) for a in range(0,len(baseUVW.stateNames))}
-        reachable = baseUVW.ddMgr.let(replaceDict,reachable) | oldReachable
+        
+        # ...remove error states, though
+        reachable = baseUVW.ddMgr.let(replaceDict,reachable) & ~baseUVW.ddMgr.add_expr("uvwState0") | oldReachable
 
     # debug
     # print("REACH:", baseUVW.ddMgr.to_expr(reachable))
@@ -818,8 +846,13 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
 
 
         # Optimize using ABC or Mockturtle
-        # with subprocess.Popen("./abc -c \"read "+os.path.join(tempDir,"test.blif")+"; resyn3; resyn2; resyn3; resyn2; resyn3; write "+os.path.join(tempDir,"testOPT.blif\""),shell=True) as abcProcess:
+        # ABC: with subprocess.Popen("./abc -c \"read "+os.path.join(tempDir,"test.blif")+"; resyn3; resyn2; resyn3; resyn2; resyn3; write "+os.path.join(tempDir,"testOPT.blif\""),shell=True) as abcProcess:
 
+        # Mockturtle preparation - Optimize using ABC
+        shutil.copyfile(os.path.join(scriptPath,"../../lib/abc/abc.rc"),os.path.join(tempDir,"abc.rc"))
+        assert os.system("../../lib/abc/abc -c \"read test.blif; resyn2; write test.blif; read testDC.blif; resyn2; write testDC.blif\"")==0
+
+        # Mockturtle
         shutil.copyfile(os.path.join(scriptPath,"../../lib/mockturtle/build/examples/exdc"),os.path.join(tempDir,"exdc"))
         shutil.copymode(os.path.join(scriptPath,"../../lib/mockturtle/build/examples/exdc"),os.path.join(tempDir,"exdc"))
         
@@ -928,13 +961,14 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
 
         formula.to_file(os.path.join(tempDir,"test.cnf"))
 
+        print("Running lingeling on:",os.path.join(tempDir,"test.cnf"))
         with Lingeling(bootstrap_with=formula.clauses) as l:
             if l.solve() == False:
                 raise Exception("No solution.")
             else:
                 # Get solution
                 solution = l.get_model()
-
+        print("Execution finished.")
 
         # Compute representation of LUTs
         # Compute LUTs
@@ -1152,9 +1186,9 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
                         print("    " + bufferVarNames[(stateNum, index)] + " = " + bufferVarNames[
                             (fromState, index)] + +";", file=outFile)
                     # Cases
-                    if ((bufferSizesInBits[fromState] % 32) < (bufferSizesInBits[stateNum] % 32)):
+                    if ((bufferSizesInBits[fromState] % 32) < (bufferSizesInBits[stateNum] % 32)) or ((bufferSizesInBits[toUVW] % 32) == 0):
                         # Simple case: appending all to the same part
-                        wordIndex = bufferSizesInBits[stateNum] // 32
+                        wordIndex = bufferSizesInBits[fromState] // 32
                         # Copy part
                         # TODO: This fails for large specs. Index computations do not seem to be correct.
                         print("    " + bufferVarNames[(stateNum, wordIndex)] + " = " +
@@ -1419,9 +1453,9 @@ def generateMonitorCodeDeterministic(dfa,baseUVW,propositions,livenessMonitoring
                                         for index in range(0,bufferSizesInBits[toUVW]//32-bufferSizesInBits[uvwStateNum]//32):
                                             print("        "+bufferVarNames[(toUVW,index)]+" = "+bufferVarNames[(fromUVW,index)]++";",file=outFile)
                                         # Cases
-                                        if ((bufferSizesInBits[fromUVW]%32) < (bufferSizesInBits[toUVW]%32)):
+                                        if ((bufferSizesInBits[fromUVW]%32) < (bufferSizesInBits[toUVW]%32)) or ((bufferSizesInBits[toUVW] % 32) == 0):
                                             # Simple case: appending all to the same part
-                                            wordIndex = bufferSizesInBits[toUVW]//32
+                                            wordIndex = bufferSizesInBits[fromUVW]//32
                                             # Copy part
                                             # TODO: This fails for large specs. Index computations do not seem to be correct.
                                             print("        "+bufferVarNames[(toUVW,wordIndex)]+" = "+bufferVarNames[(fromUVW,wordIndex)],end="",file=outFile)
@@ -1510,7 +1544,7 @@ def generateMonitorCodeDeterministic(dfa,baseUVW,propositions,livenessMonitoring
 
 
 
-def generateMonitor(inputFile,scriptbasePath,livenessMonitoring):
+def generateMonitor(inputFile,scriptbasePath,livenessMonitoring,monitorGenerationAlgorithm):
     with open(inputFile,"r") as inFile:
         allInputLines = list(inFile.readlines())
     
@@ -1615,9 +1649,14 @@ def generateMonitor(inputFile,scriptbasePath,livenessMonitoring):
                         baseUVW.transitions[state][i] = (a,baseUVW.ddMgr.true)
 
 
+    print("Computed UVW: ",baseUVW)
+
 
     # Obtain DFA from UVW
-    dfa = determiniseUVWForMonitoring(baseUVW)
+    if monitorGenerationAlgorithm=="deterministic":
+        dfa = determiniseUVWForMonitoring(baseUVW)
+    else:
+        dfa = None
     
     # Generate monitor automaton
     return (dfa,baseUVW,propositions,livenessMonitoring)
@@ -1788,7 +1827,7 @@ if __name__ == '__main__':
 
     
     if paretoCompiler is None:
-        (dfa,baseUVW,propositions,livenessMonitoring) = generateMonitor(inputFile,scriptBasePath,livenessMonitoring)
+        (dfa,baseUVW,propositions,livenessMonitoring) = generateMonitor(inputFile,scriptBasePath,livenessMonitoring,monitorGenerationAlgorithm)
         generateMonitorCode(dfa,baseUVW,propositions,livenessMonitoring,outputFile,monitorGenerationAlgorithm,nofLUTs,nofInputsPerLUT)
     else:
         (dfa,baseUVW,propositions,livenessMonitoring) = generateMonitor(inputFile,scriptBasePath,livenessMonitoring)

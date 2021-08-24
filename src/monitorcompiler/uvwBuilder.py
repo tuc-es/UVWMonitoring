@@ -18,7 +18,7 @@ import dd
 import typing
 import copy
 from functools import reduce
-from dd.autoref import BDD
+from dd.cudd import BDD
 from parser import Node, NodeTypes
 import parser
 
@@ -273,7 +273,7 @@ class UVW:
                 result = result + " (rej.)"
             result = result + ":\n"
             for a in self.transitions[i]:
-                result = result + "   - t.t.s. "+str(a[0])+" for "+a[1].to_expr()+"\n"
+                result = result + "   - t.t.s. "+str(a[0])+" for "+self.ddMgr.to_expr(a[1])+"\n"
         return result
 
     def __del__(self):
