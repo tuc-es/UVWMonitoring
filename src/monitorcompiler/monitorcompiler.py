@@ -1021,8 +1021,9 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
                 if output.startswith("uvwState"):
                     usedElsewhere = True
                 if usedElsewhere:
-                    locations[output] = "(lut" + str(lut) + "output & " + str(1 << len(newOutput)) + ")"
-                    newOutput.append(output)
+                    if not output in locations: # Already defined
+                        locations[output] = "(lut" + str(lut) + "output & " + str(1 << len(newOutput)) + ")"
+                        newOutput.append(output)
 
             LUTLocalIO[lut] = (LUTLocalIO[lut][0],newOutput)
 
@@ -1035,6 +1036,9 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
             print("  -> Outputs " + " ".join([a for a in aigDefinitions if varsLUTSignalDefinition[lut][a] in solution]))
             print("  -> Outputs Cleaned: " + " ".join(LUTLocalIO[lut][1]))
 
+        # print("Locations:")
+        # for (a,b) in locations.items():
+        #     print("- ",a,":",b)
 
         # Support check
         for lut in range(0,nofLUTs):
