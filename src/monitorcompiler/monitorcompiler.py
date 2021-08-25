@@ -8,7 +8,7 @@ import pareto_enumerator, copy, tempfile, shutil
 # Global parameters
 PRINTDEBUGINFO = False
 
-# Location of the script
+# Location of the script & Debugging options
 scriptPath = os.path.dirname(sys.argv[0])
 
 # ==========================================
@@ -850,7 +850,7 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
         # Optimize using ABC or Mockturtle
         # ABC: with subprocess.Popen("./abc -c \"read "+os.path.join(tempDir,"test.blif")+"; resyn3; resyn2; resyn3; resyn2; resyn3; write "+os.path.join(tempDir,"testOPT.blif\""),shell=True) as abcProcess:
 
-        # Mockturtle preparation - Optimize using ABC
+        # Mockturtle preparation - Convert to an AIG using ABC
         shutil.copyfile(os.path.join(scriptPath,"../../lib/abc/abc.rc"),os.path.join(tempDir,"abc.rc"))
         shutil.copyfile(os.path.join(scriptPath,"../../lib/abc/abc"),os.path.join(tempDir,"abc"))
         shutil.copymode(os.path.join(scriptPath,"../../lib/abc/abc"),os.path.join(tempDir,"abc"))
@@ -1289,8 +1289,9 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
             print("  -> Outputs " + " ".join(LUTLocalIO[lut][1]), file=outFile)
         print("*/",file=outFile)
     finally:
-        # shutil.rmtree(tempDir)
-        pass
+        # Clean up temp directory
+        if not PRINTDEBUGINFO:
+            shutil.rmtree(tempDir)
 
 def generateMonitorCodeDeterministic(dfa,baseUVW,propositions,livenessMonitoring,outFile):
 
