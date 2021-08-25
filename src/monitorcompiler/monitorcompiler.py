@@ -851,11 +851,10 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
         # ABC: with subprocess.Popen("./abc -c \"read "+os.path.join(tempDir,"test.blif")+"; resyn3; resyn2; resyn3; resyn2; resyn3; write "+os.path.join(tempDir,"testOPT.blif\""),shell=True) as abcProcess:
 
         # Mockturtle preparation - Convert to an AIG using ABC
-        shutil.copyfile(os.path.join(scriptPath,"../../lib/abc/abc.rc"),os.path.join(tempDir,"abc.rc"))
-        shutil.copyfile(os.path.join(scriptPath,"../../lib/abc/abc"),os.path.join(tempDir,"abc"))
-        shutil.copymode(os.path.join(scriptPath,"../../lib/abc/abc"),os.path.join(tempDir,"abc"))
-        
-        assert os.system("cd "+str(tempDir)+"; ./abc -c \"read test.blif; resyn2; write test.blif; read testDC.blif; resyn2; write testDC.blif\"")==0
+        #shutil.copyfile(os.path.join(scriptPath,"../../lib/abc/abc.rc"),os.path.join(tempDir,"abc.rc"))
+        #shutil.copyfile(os.path.join(scriptPath,"../../lib/abc/abc"),os.path.join(tempDir,"abc"))
+        #shutil.copymode(os.path.join(scriptPath,"../../lib/abc/abc"),os.path.join(tempDir,"abc"))
+        #assert os.system("cd "+str(tempDir)+"; ./abc -c \"read test.blif; resyn2; write test.blif; read testDC.blif; resyn2; write testDC.blif\"")==0
 
         # Mockturtle
         shutil.copyfile(os.path.join(scriptPath,"../../lib/mockturtle/build/examples/exdc"),os.path.join(tempDir,"exdc"))
