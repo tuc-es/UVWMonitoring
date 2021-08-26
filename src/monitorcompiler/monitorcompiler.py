@@ -55,7 +55,7 @@ def bddToDNF(bdd,mgr,careSet,bddVariables,propositions):
         bddLB = bddLB & ~assignmentSoFar
 
 
-    print("RED:",result)
+    # print("RED:",result)
     return result
 
 def testBDDToCNF(ddMgr,propositions):
@@ -302,15 +302,16 @@ def generateMonitorCode(dfa,baseUVW,propositions,livenessMonitoring,outFile,gene
 
 
 def pickCNFOrDNFWhateverIsShorter(cnfLabel,dnfLabel,outFile, varNames):
+    
     # Try DNF Conversion
     textDNF = ""
     if len(dnfLabel)==0:
-        textDNF = "0"
+        textDNF = "1" # 'cause is negated
     for i, case in enumerate(dnfLabel):
         if i > 0:
             textDNF += " || "
         if not False in case and not True in case:
-            textDNF += "1"
+            textDNF += "0"
         else:
             first = True
             textDNF += "("
@@ -350,7 +351,7 @@ def pickCNFOrDNFWhateverIsShorter(cnfLabel,dnfLabel,outFile, varNames):
             textCNF += ")"
 
     # Choose between CNF and DNF
-    if len(textDNF) < len(textCNF):
+    if len(textDNF) <= len(textCNF):
         print(textDNF, end="", file=outFile)
     else:
         print(textCNF, end="", file=outFile)
@@ -447,60 +448,50 @@ def generateMonitorCodeNondeterministic(dfa,baseUVW,propositions,livenessMonitor
         print("  bool " + a + " = apValues & (1 << " + str(i) + ");", file=outFile)
         print("  (void)("+a+"); // Avoid symbol ununsed warning.", file=outFile)
     print("")
+    
+    careSet = baseUVW.ddMgr.true
 
     for stateNum in range(len(baseUVW.stateNames)):
 
-        # Enumerate all incoming transitions
-        incoming = baseUVW.ddMgr.false
-        for fromState in range(len(baseUVW.stateNames)):
-            for (toState,condition) in baseUVW.transitions[fromState]:
-                if toState==stateNum:
-                    incoming = incoming | bddVariables[len(propositions)+fromState] & condition
-        del fromState
-
-        # print("incoming: ",incoming.to_expr())
-
         print("  bool nextUVW"+str(stateNum)+" = 0;",file=outFile)
-        print("  if (",file=outFile,end="")
-        careSet = baseUVW.ddMgr.true
-        # print(allBDDVarNames,"thiathia")
-        dnfLabel = bddToDNF(incoming, baseUVW.ddMgr, careSet, bddVariables, allBDDVarNames)
-        cnfLabel = bddToDNF(~incoming, baseUVW.ddMgr, careSet, bddVariables, allBDDVarNames)
-        pickCNFOrDNFWhateverIsShorter(cnfLabel, dnfLabel, outFile, allBDDVarNames)
-        print(") {",file=outFile)
-        print("    nextUVW" + str(stateNum) + " = 1;", file=outFile)
-
+       
         # Not already in the state or self-loop inactive?
-        print("    if (!uvwState"+str(stateNum)+" || (",file=outFile,end="")
+        print("  if (uvwState"+str(stateNum)+" && (",file=outFile,end="")
+
         # Enumerate all self-loops transitions
         incoming = baseUVW.ddMgr.false
         for (toState, condition) in baseUVW.transitions[stateNum]:
             if toState == stateNum:
                 incoming = incoming | condition
+                assert not condition == baseUVW.ddMgr.false 
+                assert not incoming == baseUVW.ddMgr.false
+        assert not (stateNum==0 and incoming==baseUVW.ddMgr.false)
         dnfLabel = bddToDNF(~incoming, baseUVW.ddMgr, careSet, bddVariables, allBDDVarNames)
         cnfLabel = bddToDNF(incoming, baseUVW.ddMgr, careSet, bddVariables, allBDDVarNames)
         pickCNFOrDNFWhateverIsShorter(cnfLabel, dnfLabel, outFile, allBDDVarNames)
         print(")) {", file = outFile)
-        print("      // Not previously here",file=outFile)
+        print("    nextUVW"+str(stateNum)+" = 1;",file=outFile)
         if livenessMonitoring:
             if not (stateNum == 0) and baseUVW.rejecting[stateNum]:
-                print("      cnt" + str(stateNum) + "=1;",file=outFile)
-        first = True
+                print("    cnt" + str(stateNum) + "=1;",file=outFile)
+                print("    if ((cnt" + str(stateNum) + " & FREQUENCY_MASK_STARVATION_LOGGING)==0) {", file=outFile)
+                print("      logLivenessStarvation(" + str(stateNum) + ",cnt" + str(stateNum) + ", &buf.b" + str(
+                    stateNum) + "p0," + str(bufferSizesInWords[stateNum]) + ");", file=outFile)
+                print("    }", file=outFile)
+        print("  }", file = outFile)
 
         # Incoming transitions - copy buffer information
         for fromUVW in range(len(baseUVW.stateNames)):
             for (toUVW,condition) in baseUVW.transitions[fromUVW]:
                 if toUVW==stateNum and fromUVW!=toUVW:
-                    print("      ",file=outFile,end="")
-                    if not first:
-                        print("else ", file=outFile, end="")
-                    first = False
-                    transitionCond = bddVariables[len(propositions)+fromUVW] & condition
-                    print("if (", file=outFile, end="")
+                    print("  else ", file=outFile, end="")
+                    transitionCond = condition # bddVariables[len(propositions)+fromUVW] & condition
+                    print("if (uvwState"+str(fromUVW)+" && (", file=outFile, end="")
                     dnfLabel = bddToDNF(transitionCond, baseUVW.ddMgr, careSet, bddVariables, allBDDVarNames)
                     cnfLabel = bddToDNF(~transitionCond, baseUVW.ddMgr, careSet, bddVariables, allBDDVarNames)
                     pickCNFOrDNFWhateverIsShorter(cnfLabel, dnfLabel, outFile, allBDDVarNames)
-                    print(") {", file=outFile)
+                    print(")) {", file=outFile)
+                    print("    nextUVW"+str(stateNum)+" = 1;",file=outFile)
 
                     # print("Mux: ",baseUVW.transitions[fromUVW])
                     indexIncomingTransition = -1
@@ -522,7 +513,7 @@ def generateMonitorCodeNondeterministic(dfa,baseUVW,propositions,livenessMonitor
                         assert len(propositions)>0
                         # Copy part
                         # TODO: This fails for large specs. Index computations do not seem to be correct.
-                        print("        " + bufferVarNames[(toUVW, wordIndex)] + " = " +
+                        print("    " + bufferVarNames[(toUVW, wordIndex)] + " = " +
                               bufferVarNames[(fromUVW, wordIndex)], end="", file=outFile)
                         # Add proposition values
                         print(" | (apValues << " + str(
@@ -554,25 +545,13 @@ def generateMonitorCodeNondeterministic(dfa,baseUVW,propositions,livenessMonitor
                     
                         raise Exception("This case is currently untested.")
 
-                    print("      }", file=outFile)
+                    if toUVW==0:
+                        print("    logViolationExplanation(0,&(buf.b0p0)," + str(bufferSizesInWords[0] * 4) + ");", file=outFile)
 
-        if stateNum==0:
-            print("      logViolationExplanation(0,&(buf.b0p0)," + str(bufferSizesInWords[0] * 4) + ");", file=outFile)
-
-        # Counter increase
-        if livenessMonitoring:
-            if not (stateNum == 0) and baseUVW.rejecting[stateNum]:
-                print("    } else {", file=outFile)
-                print("      cnt" + str(stateNum) + "++;",file=outFile)
-                print("      if ((cnt" + str(stateNum) + " & FREQUENCY_MASK_STARVATION_LOGGING)==0) {", file=outFile)
-                print("        logLivenessStarvation(" + str(stateNum) + ",cnt" + str(stateNum) + ", &buf.b" + str(
-                    stateNum) + "p0," + str(bufferSizesInWords[stateNum]) + ");", file=outFile)
-                print("      }", file=outFile)
-
-        print("    }", file=outFile)
+                    print("  }", file=outFile)
 
 
-        print("  }", file=outFile)
+
 
 
     for i, a in enumerate(baseUVW.stateNames):
@@ -989,12 +968,14 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
             for i, a in enumerate(varsLUTInputSelection[lut]):
                 if varsLUTInputSelection[lut][a] in solution:
                     localInputs.append(a)
+                    #print("LOCAL INPUT TO LUT "+str(lut)+" : ",a,varsLUTInputSelection[lut][a])
 
             # LUT output
             localOutputs = []
             for i, a in enumerate(aigDefinitions):
                 if varsLUTSignalDefinition[lut][a] in solution:
                     localOutputs.append(a)
+                    #print("LOCAL OUTPUT TO LUT "+str(lut)+" : ",a,varsLUTSignalDefinition[lut][a])
 
             LUTLocalIO.append((localInputs, localOutputs))
 
@@ -1002,10 +983,31 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
         print("Preopt A:", LUTLocalIO)
         for lut in range(0, nofLUTs):
             inputsNeeded = set([])
+
+            # ---> (a) input is not needed for the chosen output
             for output in LUTLocalIO[lut][1]:
                 for b in aigDefinitions[output][0]:
                     inputsNeeded.add(b)
-            LUTLocalIO[lut] = ([a for a in LUTLocalIO[lut][0] if a in inputsNeeded],LUTLocalIO[lut][1])
+
+            # ---> (b) input than cannot be derived from other input
+            finalInputNeeded = set([])
+            for localIn in inputsNeeded:
+            
+                if not localIn in aigDefinitions:
+                    finalInputNeeded.add(localIn)
+                else:
+                    foundAll = True
+                    for b in aigDefinitions[localIn][0]:
+                        if not b in inputsNeeded:
+                            foundAll = False
+                    if not foundAll:
+                        finalInputNeeded.add(localIn)
+                
+            LUTLocalIO[lut] = ([a for a in LUTLocalIO[lut][0] if a in finalInputNeeded],LUTLocalIO[lut][1])
+        
+        # ---> (b) input that can be inferred from the other input
+        
+        
 
         # Clean the LUTs by output not actually needed
         print("Preopt B:",LUTLocalIO)
@@ -1041,9 +1043,9 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
         #     print("- ",a,":",b)
 
         # Support check
-        for lut in range(0,nofLUTs):
-            if len([a for a in aigDefinitions if varsLUTSignalDefinition[lut][a] in solution])>32:
-                raise Exception("Too many LUT outputs -- currently unsupported.")
+        for (a,b) in LUTLocalIO:
+            if len(b)>32:
+                raise Exception("Too many LUT outputs. Currently unsupported.")
 
         # Declare variables in Monitor code
         print("#include \"UVWMonitor.h\"", file=outFile)
@@ -1154,7 +1156,7 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
             currentIndex = 0
             for i,a in enumerate(LUTLocalIO[lut][0]):
                 if currentIndex>0:
-                    print(" + ", file=outFile,end="")
+                    print(" | ", file=outFile,end="")
                 print("("+locations[a]+">0?"+str(1<<currentIndex)+":0)", file=outFile,end="")
                 currentIndex += 1
             if currentIndex==0:
@@ -1254,7 +1256,8 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
 
         # Next states
         for i, a in enumerate(baseUVW.stateNames):
-            print("  uvwState"+str(i) + " = ("+ locations["uvwState"+str(i)+"Next"]+")>0?1:0;", file=outFile)
+            # Old, slightly larger code print("  uvwState"+str(i) + " = ("+ locations["uvwState"+str(i)+"Next"]+")>0?1:0;", file=outFile)
+            print("  uvwState"+str(i) + " = "+ locations["uvwState"+str(i)+"Next"]+";", file=outFile)
         print("")
         print("}\n", file=outFile)
 
