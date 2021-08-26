@@ -956,10 +956,13 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
         # Compute representation of LUTs
         # Compute LUTs
         locations = {}
+        locationsMask = {}
         for i, p in enumerate(propositions):
             locations[p] = "(apValues & " + str(1 << i) + ")"
+            locationsMask[p] = ("apValues", i)
         for i, p in enumerate(baseUVW.stateNames):
             locations["uvwState" + str(i)] = "uvwState" + str(i)
+            locationsMask["uvwState" + str(i)] = ("uvwState" + str(i),0)
         LUTLocalIO = []
         for lut in range(0, nofLUTs):
 
@@ -1024,19 +1027,10 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
                     usedElsewhere = True
                 if usedElsewhere:
                     if not output in locations: # Already defined
-                        locations[output] = "(lut" + str(lut) + "output & " + str(1 << len(newOutput)) + ")"
                         newOutput.append(output)
 
             LUTLocalIO[lut] = (LUTLocalIO[lut][0],newOutput)
 
-
-        print("Lookup-Table contents:")
-        for lut in range(0,nofLUTs):
-            print("- LUT "+str(lut)+" has:")
-            print("  -> Inputs "+" ".join([a for a in varsLUTInputSelection[lut] if varsLUTInputSelection[lut][a] in solution]))
-            print("  -> Inputs Cleaned: "+" ".join(LUTLocalIO[lut][0]))
-            print("  -> Outputs " + " ".join([a for a in aigDefinitions if varsLUTSignalDefinition[lut][a] in solution]))
-            print("  -> Outputs Cleaned: " + " ".join(LUTLocalIO[lut][1]))
 
         # print("Locations:")
         # for (a,b) in locations.items():
@@ -1046,6 +1040,76 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
         for (a,b) in LUTLocalIO:
             if len(b)>32:
                 raise Exception("Too many LUT outputs. Currently unsupported.")
+
+
+        # Rearrange input and output so that few inline ORs are necessary in the LUT lookup
+        # 1. Start with the input propositions
+        fixedInputs = set([])
+        for lut,(a,b) in enumerate(LUTLocalIO):
+            for j,ap in enumerate(propositions):
+                if ap in a:
+                    if j<len(a):
+                        oldPos = a.index(ap)
+                        if oldPos!=j:
+                            tmp1 = a[oldPos]
+                            tmp2 = a[j]
+                            a[j] = tmp1
+                            a[oldPos] = tmp2
+                        fixedInputs.add((lut,j))
+        # 2. Fix others
+        for lut,(a,b) in enumerate(LUTLocalIO):
+            newOutputOrder = [None for i in LUTLocalIO[lut][1]]
+            for j,output in enumerate(LUTLocalIO[lut][1]):
+                possibleLocations = [0 for tmp in LUTLocalIO[lut][1]]
+                for otherlut,(a2,b2) in enumerate(LUTLocalIO):
+                    if otherlut>lut:
+                        if output in a2:
+                            for pos in range(len(LUTLocalIO[lut][1])):
+                                if not (otherlut,pos) in fixedInputs:
+                                    possibleLocations[pos] += 1
+                # Search for best sos
+                bestPos = -1
+                bestPosValue = -1
+                for i in range(len(LUTLocalIO[lut][1])):
+                    if newOutputOrder[i]==None:
+                        if possibleLocations[i]>bestPosValue:
+                            bestPos = i
+                            bestPosValue = possibleLocations[i]
+                newOutputOrder[bestPos] = output
+                
+                # Fix others
+                for otherlut,(a2,b2) in enumerate(LUTLocalIO):
+                    if otherlut>lut:
+                        if output in a2:
+                            if not (otherlut,bestPos) in fixedInputs:
+                                if bestPos<len(a2):
+                                    # Swap
+                                    tmp1 = a2[a2.index(output)]
+                                    tmp2 = a2[bestPos]
+                                    a2[a2.index(output)] = tmp2
+                                    a2[bestPos] = tmp1
+                                    fixedInputs.add((otherlut,bestPos))
+
+            assert not None in newOutputOrder
+            LUTLocalIO[lut] = (LUTLocalIO[lut][0],newOutputOrder)
+
+
+        print("Lookup-Table contents:")
+        for lut in range(0,nofLUTs):
+            print("- LUT "+str(lut)+" has:")
+            print("  -> Inputs "+" ".join([a for a in varsLUTInputSelection[lut] if varsLUTInputSelection[lut][a] in solution]))
+            print("  -> Inputs Cleaned: "+" ".join(LUTLocalIO[lut][0]))
+            print("  -> Outputs " + " ".join([a for a in aigDefinitions if varsLUTSignalDefinition[lut][a] in solution]))
+            print("  -> Outputs Cleaned: " + " ".join(LUTLocalIO[lut][1]))                
+
+        # Define locations
+        print("Preopt B:",LUTLocalIO)
+        for lut in range(0, nofLUTs):
+            for j,output in enumerate(LUTLocalIO[lut][1]):
+                if not output in locations: # Already defined
+                    locations[output] = "(lut" + str(lut) + "output & " + str(1 << j) + ")"
+                    locationsMask[output] = ("lut" + str(lut) + "output",j)
+
 
         # Declare variables in Monitor code
         print("#include \"UVWMonitor.h\"", file=outFile)
@@ -1152,14 +1216,29 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
         for lut in range(0,nofLUTs):
 
             # LUT input
+            # -> Use the trick to pass through bits that are already at the right location.
             print("  uint32_t lut"+str(lut)+"input = ", file=outFile,end="")
-            currentIndex = 0
+            passThrough = {}
+            allParts = []
             for i,a in enumerate(LUTLocalIO[lut][0]):
-                if currentIndex>0:
-                    print(" | ", file=outFile,end="")
-                print("("+locations[a]+">0?"+str(1<<currentIndex)+":0)", file=outFile,end="")
-                currentIndex += 1
-            if currentIndex==0:
+
+                maskLocation = locationsMask[a]
+                if i==maskLocation[1]:
+                    if not maskLocation[0] in passThrough:
+                        passThrough[maskLocation[0]] = 1 << maskLocation[1]
+                    else:
+                        passThrough[maskLocation[0]] |= 1 << maskLocation[1]
+                else:
+                    allParts.append("("+locations[a]+">0?"+str(1<<i)+":0)")
+            
+            # Passthrough
+            for (a,b) in passThrough.items():
+                allParts.append("("+a+" & "+str(b)+")")
+
+            # Join them all
+            print(" | ".join(allParts),file=outFile,end="")
+
+            if len(allParts)==0:
                 print("0",file=outFile,end="") # Special case - LUT not actually used.
             print(";",file=outFile)
 
