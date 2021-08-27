@@ -935,9 +935,10 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
                     else:
                         # Input signal - has to come from here.
                         formula.append([-1 * varsLUTSignalDefinition[lut][aigNodeName], varsLUTInputSelection[lut][insig]])
+                        
 
         # Encode: at most nofInputsPerLUT selected per level
-        vpool = IDPool(start_from=nofVarsSoFar)
+        vpool = IDPool(start_from=nofVarsSoFar+1)
         for lut in range(nofLUTs):
             am1 = CardEnc.atmost([b for (a,b) in varsLUTInputSelection[lut].items()],nofInputsPerLUT,vpool=vpool, encoding=EncType.sortnetwrk)
             formula.extend(am1)
