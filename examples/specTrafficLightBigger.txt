@@ -60,7 +60,11 @@ G ( (d1 & !d2) -> !(c1 & !c2) )
 G ( (m & (!a1 & a2)) -> X (!m | (!a1 & a2)) )
 
 
-# We have two greens before a button press???
+# Approximated chains for "(~m W ((a1 & ~a2 & X(~a1 & a2) ))"
+~(~a1|a2) R (((~a1&m)|(a2&m)) -> X (false))
+~(~a2|a1) R (((~a1&~a2&m)|(a1&a2&m)) -> X (false))
+~(~a1|a2) R ((a1&~a2&m) -> X (~(~a2|a1) R (((~a2&~m)|(a1&~m)|(a1&~a2)) -> X (false))))
+~(~a2|a1) R ((a1&~a2&m) -> X (~(~a2|a1) R (((~a2&~m)|(a1&~m)|(a1&~a2)) -> X (false))))
 
 
 

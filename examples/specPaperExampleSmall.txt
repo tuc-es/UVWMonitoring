@@ -1,0 +1,4 @@
+APs: a b c
+
+G (a -> X (b W c))
+

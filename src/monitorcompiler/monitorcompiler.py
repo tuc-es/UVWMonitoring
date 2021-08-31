@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Monitor compiler
-import sys, os
+import sys, os, time
 import uvwBuilder, subprocess, parser, math
 import pareto_enumerator, copy, tempfile, shutil
 
@@ -944,15 +944,40 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
             formula.extend(am1)
 
         formula.to_file(os.path.join(tempDir,"test.cnf"))
+        
+        print("Wrote CNF file to:",os.path.join(tempDir,"test.cnf"))
+        sys.stdout.flush()
+        # raise Exception(3) # Temporary to extract CNF files
 
-        print("Running cadical on:",os.path.join(tempDir,"test.cnf"))
-        with Cadical(bootstrap_with=formula.clauses) as l:
-            if l.solve() == False:
-                raise Exception("No solution.")
-            else:
-                # Get solution
-                solution = set(l.get_model())
-        print("Execution finished.")
+        # print("Running cadical on:",os.path.join(tempDir,"test.cnf"))
+        # with Cadical(bootstrap_with=formula.clauses) as l:
+        #     if l.solve() == False:
+        #         raise Exception("No solution.")
+        #     else:
+        #         # Get solution
+        #         solution = set(l.get_model())
+        # print("Execution finished.")
+        
+        # Run Kissat
+        kissatProcess = subprocess.Popen(scriptPath+"/../../lib/kissat/build/kissat "+os.path.join(tempDir,"test.cnf"),stdout=subprocess.PIPE,encoding="utf-8",shell=True)
+        isSAT = None
+        solution = set([])
+        for inputLine in kissatProcess.stdout.readlines():
+            if inputLine=="s SATISFIABLE\n":
+                isSAT = True
+            elif inputLine=="s UNSATISFIABLE\n":
+                isSAT = False
+            if inputLine.startswith("v "):
+                line = inputLine.split(" ")
+                for a in line[1:]:
+                    if a!=0:
+                        solution.add(int(a))
+        if isSAT is None:
+            raise Exception("Did not find Kissat result. Was the process terminated? Does the Kissat executable exist?")
+        if not isSAT:
+            raise Exception("Error: No solution found. Cannot compute monitor.")
+        kissatProcess.wait()
+        
 
         # Compute representation of LUTs
         # Compute LUTs
@@ -1147,11 +1172,11 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
 
             # Build LUT table
             if len(localOutputs)<=8:
-                print("uint8_t ",file=outFile,end="")
+                print("const uint8_t ",file=outFile,end="")
             elif len(localOutputs)<=16:
-                print("uint16_t ", file=outFile, end="")
+                print("const uint16_t ", file=outFile, end="")
             else:
-                print("uint32_t ", file=outFile, end="")
+                print("const uint32_t ", file=outFile, end="")
             print("lut"+str(lut)+"["+str(1 << len(localInputs))+"] = {", file=outFile,end="")
             for lutInput in range(1 << len(localInputs)):
                 # print("LUT:",lut,lutInput)

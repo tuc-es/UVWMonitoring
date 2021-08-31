@@ -190,6 +190,7 @@ def readHOA(sourceStream):
     readingMode = 0  # 0=headers, 1=body, 2=ended
     currentState = None
     nextLines = list(sourceStream.readlines())
+    stateTrans = ""
     for line in nextLines:
         line = line.strip()
 
@@ -281,11 +282,15 @@ def readHOA(sourceStream):
             elif line.startswith("State: "):
                 # Read a new state
                 restLine = line[7:] + " "
-                if restLine[0] == "[":
-                    raise Exception("State Labels not supported.")
                 assert restLine.find(" ") != -1
                 currentState = int(restLine[0:restLine.find(" ")])
                 stateName = restLine[restLine.find(" ") + 1:]
+                # State is colored?
+                if "{" in stateName:
+                    stateTrans = stateName[stateName.index("{"):]
+                    stateName = stateName[0:stateName.index("{")-1]
+                else:
+                    stateTrans = ""
                 while len(tgba.states) <= currentState:
                     tgba.states = tgba.states + [None]
                 tgba.states[currentState] = stateName
@@ -299,7 +304,7 @@ def readHOA(sourceStream):
                 # To where
                 lineRest = line[parsePos + 1:] + " "
                 toState = int(lineRest[0:lineRest.find(" ")])
-                postPart = lineRest[lineRest.find(" ") + 1:].strip()
+                postPart = (lineRest[lineRest.find(" ") + 1:]+stateTrans).strip()
                 if postPart == "":
                     # Acceptance Condition
                     acc = set([])
@@ -451,6 +456,7 @@ def enumerateChains(tgba):
     # the automaton is not minimized *or* has a universal safety hull.
     if len(rejectsAllStates)<1:
         # Ok, no chains in this case
+        print("Warning: No state rejecting all suffix words.")
         return []
 
     if len(rejectsAllStates)>1:
@@ -577,7 +583,7 @@ def enumerateChains(tgba):
         # it does not have to be modeled
         def oracle(point):
 
-            print("Enumerate",point, file=sys.stderr)
+            # print("Enumerate",point, file=sys.stderr)
 
             # Check if all the words leading here are OK --> they must all be shortest words
             possibilities = [[shortestWordsDFA.initial_state]]
@@ -717,7 +723,7 @@ def enumerateChains(tgba):
                 paretoFrontPart.append(nextPoint)
 
         paretoFrontAll.extend(paretoFrontPart)
-        print("***FRONT: ",paretoFrontPart)
+        # print("***FRONT: ",paretoFrontPart)
 
     # Dotting function
     def chainListToDOT(outFile):
@@ -836,10 +842,112 @@ def enumerateChains(tgba):
     chainListToDOT(open("/tmp/chains.dot","w"))
 
     print("*** Nof final chains: "+str(len(paretoFrontAll)))
-    # print("Order of APs:",list(tgba.propositions))
-    # if len(paretoFrontAll)>1:
-    #     assert False # Testing 1-2-3
+    # print("Chains in LTL fragment for UVWs:")
+    # print(paretoFrontAll)    
+    # Print chains
+    nofCharacters = len(shortestWordsNFA.input_symbols)
+    allChainLTL = []
+    for chain in paretoFrontAll:
+    
+        chainLength = len(chain) // len(dfaRejectingSuffixes.input_symbols) // 2
+    
+        rest = "false"
+    
+        for pos in range(chainLength-1,-1,-1):
+        
+            # Compute the transition Characters and SelfLoopChars taking the character order in the DFA into account
+            transitionChars = [None for a in range(nofCharacters)]
+            selfLoopChars = [None for a in range(nofCharacters)]
+            for k,s in enumerate(dfaRejectingSuffixes.input_symbols):
+                selfLoopChars[int(s)] = chain[(chainLength+pos)*len(dfaRejectingSuffixes.input_symbols)+k]==0
+                transitionChars[int(s)] = chain[pos * len(dfaRejectingSuffixes.input_symbols) + k] == 0
+        
+        
+            # print("T,SL:",transitionChars,selfLoopChars)
+            
+            # Format as DNF
+            def toDNFCharList(charactersOriginal):
+                # print("DNFMaker:",charactersOriginal)
+                characters = copy.copy(charactersOriginal)
+                allDNFs = []
+                while True in characters:
+                    posTrue = characters.index(True)
+                    # print("POSTRUE:",posTrue)
+                    thisChar = []
+                    for i in range(0,len(tgba.propositions)):
+                        if (posTrue & (1 << i))>0:
+                            thisChar.append(True)
+                        else:
+                            thisChar.append(False)
+                    # print("THISCHAR:",thisChar)
+                    # Ok, now simplify disjunct
+                    for posSimp in range(0,len(tgba.propositions)):
+                        # print("POSSIMP",posSimp)
+                        allowed = True
+                        for i in range(0,nofCharacters):
+                            # Check if accepted
+                            capturedChar = True
+                            for j in range(0,len(tgba.propositions)):
+                                if j!=posSimp:
+                                    if ((i & (1<<j))>0) != thisChar[j] and not thisChar[j] is None:
+                                        capturedChar = False
+                                        # print("NOT CAPTURED",j,i,posSimp,thisChar)
+                            if capturedChar:
+                                # print("CAPTURED CHAR",posSimp,i,thisChar)
+                                if (not characters[i] is None) and characters[i]==False:
+                                    allowed = False
+                                    # print("NOT ALLOWED",posSimp,thisChar)
+                        if allowed:
+                            thisChar[posSimp] = None
+                        # print("AFTER POSSIMP:",characters,thisChar)
 
+                    # Ok, disjunct done
+                    for i in range(0,nofCharacters):
+                        # Check if accepted
+                        capturedChar = True
+                        for j in range(0,len(tgba.propositions)):
+                            if (thisChar[j]!=None) and ((i & (1<<j))>0) != thisChar[j]:
+                                capturedChar = False
+                        if capturedChar:
+                            # print("ERASE CHAR",i,thisChar)
+                            characters[i] = None
+                    
+                    # Add disjunct
+                    disjunct = []
+                    for i,a in enumerate(thisChar):
+                        if a==False:
+                            disjunct.append("~"+tgba.propositions[i])
+                        elif a==True:
+                            disjunct.append(tgba.propositions[i])
+                    if len(disjunct)==0:
+                        return "true"
+                    elif len(disjunct)==1:
+                        allDNFs.append(disjunct[0])
+                    else:
+                        allDNFs.append("("+"&".join(disjunct)+")")
+            
+                # Return DNF
+                if len(allDNFs)==0:
+                    return "false"
+                elif len(allDNFs)==1:
+                    return allDNFs[0] 
+                else:
+                    # print("Trans:",charactersOriginal,"("+"|".join(allDNFs)+")")
+                    return "("+"|".join(allDNFs)+")"
+              
+            
+            # print("Bu:",toDNFCharList([False,True,False,True,False,True,False,True]))
+              
+              
+            rest = "~"+toDNFCharList(selfLoopChars)+" R ("+toDNFCharList(transitionChars)+" -> X ("+ rest+"))"
+            
+
+        allChainLTL.append(rest)
+        
+    allChainLTL.sort()
+    print("\n".join(allChainLTL))
+     
+    
 # =====================================================
 # Try to find a formula where there are infinitely many different shortest words
 # =====================================================
