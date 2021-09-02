@@ -101,7 +101,7 @@ class Runner:
             rusage = resource.getrusage(resource.RUSAGE_CHILDREN)
             experiment.cpuTime = (rusage.ru_utime-oldrusage.ru_utime)+(rusage.ru_stime-oldrusage.ru_stime)
             if returnValue!=0:
-                raise Exception("Execution failed. with error level "+str(returnValue)+". Stderr output: "+"".join(experiment.errors))
+                raise Exception("Execution failed. with error level "+str(returnValue)+". Stderr output: "+"\n".join(experiment.errors))
             endTime = time.time()
             experiment.wallTime = endTime-startTime
             self.overallCPUTime += experiment.cpuTime

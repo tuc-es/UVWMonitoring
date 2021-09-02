@@ -135,7 +135,7 @@ def extractFlashAndMemUsageFromPlatformIORun(output):
             parts = line.split(" ")
             assert flash is None
             flash = int(parts[parts.index("(used")+1])
-    return (ram,flash)
+    return (flash,ram)
 
 # Experiment B1: No monitoring code
 with open("../demos/TrafficLightsL010RB/Src/monitor.c","w") as outFile:
@@ -169,7 +169,7 @@ runner.log(\
     ram)    
 
 # Experiment B3: Optimizing Monitors / Cases that work
-for (nofLUTs,nofInputs) in [(15,5),(11,6),(9,7),(3,8)]:
+for (nofLUTs,nofInputs) in [(7,8),(15,5),(11,6),(9,7)]:
     exp = runner.run("../src/monitorcompiler","./monitorcompiler.py ../../examples/specTrafficLightBigger.txt --aigBased --nofLUTs "+str(nofLUTs)+" --nofInputsPerLUT "+str(nofInputs)+" --outFile ../../demos/TrafficLightsL010RB/Src/monitor.c")
     runner.log(\
         "Computation Time Optimizing Monitor Compiler "+str(nofLUTs)+" LUTS " + str(nofInputs)+" Inputs Traffic Light",

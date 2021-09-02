@@ -7,6 +7,7 @@ import pareto_enumerator, copy, tempfile, shutil
 
 # Global parameters
 PRINTDEBUGINFO = False
+RUN_CADICAL = False
 
 # Location of the script & Debugging options
 scriptPath = os.path.dirname(sys.argv[0])
@@ -940,43 +941,43 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
         # Encode: at most nofInputsPerLUT selected per level
         vpool = IDPool(start_from=nofVarsSoFar+1)
         for lut in range(nofLUTs):
-            am1 = CardEnc.atmost([b for (a,b) in varsLUTInputSelection[lut].items()],nofInputsPerLUT,vpool=vpool, encoding=EncType.sortnetwrk)
+            am1 = CardEnc.atmost([b for (a,b) in varsLUTInputSelection[lut].items()],nofInputsPerLUT,vpool=vpool, encoding=EncType.totalizer)
             formula.extend(am1)
 
         formula.to_file(os.path.join(tempDir,"test.cnf"))
         
         print("Wrote CNF file to:",os.path.join(tempDir,"test.cnf"))
         sys.stdout.flush()
-        # raise Exception(3) # Temporary to extract CNF files
-
-        # print("Running cadical on:",os.path.join(tempDir,"test.cnf"))
-        # with Cadical(bootstrap_with=formula.clauses) as l:
-        #     if l.solve() == False:
-        #         raise Exception("No solution.")
-        #     else:
-        #         # Get solution
-        #         solution = set(l.get_model())
-        # print("Execution finished.")
         
-        # Run Kissat
-        kissatProcess = subprocess.Popen(scriptPath+"/../../lib/kissat/build/kissat "+os.path.join(tempDir,"test.cnf"),stdout=subprocess.PIPE,encoding="utf-8",shell=True)
-        isSAT = None
-        solution = set([])
-        for inputLine in kissatProcess.stdout.readlines():
-            if inputLine=="s SATISFIABLE\n":
-                isSAT = True
-            elif inputLine=="s UNSATISFIABLE\n":
-                isSAT = False
-            if inputLine.startswith("v "):
-                line = inputLine.split(" ")
-                for a in line[1:]:
-                    if a!=0:
-                        solution.add(int(a))
-        if isSAT is None:
-            raise Exception("Did not find Kissat result. Was the process terminated? Does the Kissat executable exist?")
-        if not isSAT:
-            raise Exception("Error: No solution found. Cannot compute monitor.")
-        kissatProcess.wait()
+        if RUN_CADICAL:
+            with Cadical(bootstrap_with=formula.clauses) as l:
+                if l.solve() == False:
+                    raise Exception("No solution.")
+                else:
+                    # Get solution
+                    solution = set(l.get_model())
+            print("Execution finished.")
+
+        else:        
+            # Run Kissat
+            kissatProcess = subprocess.Popen(scriptPath+"/../../lib/kissat/build/kissat "+os.path.join(tempDir,"test.cnf"),stdout=subprocess.PIPE,encoding="utf-8",shell=True)
+            isSAT = None
+            solution = set([])
+            for inputLine in kissatProcess.stdout.readlines():
+                if inputLine=="s SATISFIABLE\n":
+                    isSAT = True
+                elif inputLine=="s UNSATISFIABLE\n":
+                    isSAT = False
+                if inputLine.startswith("v "):
+                    line = inputLine.split(" ")
+                    for a in line[1:]:
+                        if a!=0:
+                            solution.add(int(a))
+            if isSAT is None:
+                raise Exception("Did not find Kissat result. Was the process terminated? Does the Kissat executable exist?")
+            if not isSAT:
+                raise Exception("Error: No solution found. Cannot compute monitor.")
+            kissatProcess.wait()
         
 
         # Compute representation of LUTs
@@ -1034,12 +1035,11 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
                 
             LUTLocalIO[lut] = ([a for a in LUTLocalIO[lut][0] if a in finalInputNeeded],LUTLocalIO[lut][1])
         
-        # ---> (b) input that can be inferred from the other input
-        
         
 
         # Clean the LUTs by output not actually needed
         print("Preopt B:",LUTLocalIO)
+        outputsDefined = set([])
         for lut in range(0, nofLUTs):
             newOutput = []
             for output in LUTLocalIO[lut][1]:
@@ -1052,8 +1052,9 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
                 if output.startswith("uvwState"):
                     usedElsewhere = True
                 if usedElsewhere:
-                    if not output in locations: # Already defined
+                    if not output in outputsDefined: # Already defined
                         newOutput.append(output)
+                        outputsDefined.add(output)
 
             LUTLocalIO[lut] = (LUTLocalIO[lut][0],newOutput)
 
