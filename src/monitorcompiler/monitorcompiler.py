@@ -413,6 +413,7 @@ def generateMonitorCodeNondeterministic(dfa,baseUVW,propositions,livenessMonitor
     assert math.ceil(math.log(maxNofBitsTransitions) / math.log(2)) + len(propositions) <= 32
 
     # Declare variables in Monitor code
+    print("#ifndef NO_MONITORING", file=outFile)
     print("#include \"UVWMonitor.h\"", file=outFile)
     print("#include <stdbool.h>", file=outFile)
     print("/* Declare variables for monitoring */", file=outFile)
@@ -547,7 +548,7 @@ def generateMonitorCodeNondeterministic(dfa,baseUVW,propositions,livenessMonitor
                         raise Exception("This case is currently untested.")
 
                     if toUVW==0:
-                        print("    logViolationExplanation(0,&(buf.b0p0)," + str(bufferSizesInWords[0] * 4) + ");", file=outFile)
+                        print("    logViolationExplanation(&(buf.b0p0)," + str(bufferSizesInWords[0] * 4) + ");", file=outFile)
 
                     print("  }", file=outFile)
 
@@ -559,6 +560,7 @@ def generateMonitorCodeNondeterministic(dfa,baseUVW,propositions,livenessMonitor
         print("  uvwState"+str(i) + " = nextUVW"+str(i)+";", file=outFile)
     print("")
     print("}\n", file=outFile)
+    print("#endif", file=outFile)
 
     # Add decoding information for the buffers:
     print("/* Decoding information for the buffers:", file=outFile)
@@ -722,7 +724,6 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
                             allConjuncts.append(("!",allBDDVarNames[i]))
                 allDisjuncts.append(("&",tuple(allConjuncts)))
             parts.append(("&",(("|",tuple(allDisjuncts)),"uvwState"+str(fromState))))
-            # if not fromState==toState:
             conditionBits["uvwState"+str(toState)+"incoming"+str(transitionIndex)] = parts[-1]
 
         conditionBits["uvwState" + str(toState) + "Next"] = ("|", tuple(parts))
@@ -845,7 +846,6 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
 
         # Read back BLIF file
         aigDefinitions = {}
-        orderAIGNodes = []
         with open(os.path.join(tempDir,"testOPT.blif"),"r") as blifInFile:
             currentAIGDefinition = None
             overlay = None
@@ -879,9 +879,66 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
                             assert not aps[-1] in aigDefinitions
                             aigDefinitions[aps[-1]] = [aps[0:len(aps)-1],[]]
                             currentAIGDefinition = aps[-1]
-                            orderAIGNodes.append(aps[-1])
                     else:
                         aigDefinitions[currentAIGDefinition][1].append(line.strip())
+
+
+        # =============================================================================
+        # Clean the AIG so that internal nodes that are forwarded to external nodes do no longer appear.
+        # =============================================================================
+        todo = set(aigDefinitions.keys())
+        while len(todo)!=0:
+            thisOne = todo.pop()
+            if thisOne in aigDefinitions:
+                thisOneDef = aigDefinitions[thisOne]
+                if len(thisOneDef[0])==1:
+                    if thisOneDef[1] == ["1 1"]:
+                        # Ok, replace the predecessor ID
+
+                        toReplace = thisOneDef[0][0]
+                        if not toReplace.startswith("uvw"): # No aliasing on global outputs
+                            aigDefinitions[thisOne] = aigDefinitions[toReplace]
+                            aigDefinitions.pop(toReplace)
+                            print("Replacing",toReplace,"by",thisOne)
+                            
+                            # Replace old reference
+                            def replace(a,b,c):
+                                    res = []
+                                    for d in a:
+                                        if d==b:
+                                            res.append(c)
+                                        else:
+                                            res.append(d)
+                                    return res
+                            allKeys = set(aigDefinitions.keys())
+                            for key in allKeys:
+                                if toReplace in aigDefinitions[key][0]:
+                                    aigDefinitions[key] = [replace(aigDefinitions[key][0],toReplace,thisOne)]+aigDefinitions[key][1:]
+                                    todo.add(key)
+                                        
+
+        print("New AIG Definitions: ")
+        for (a,b) in aigDefinitions.items():
+            print(a+": "+" ".join(b[0]))
+            for c in b[1:]:
+                print("   "+"\n".join(c))
+
+
+        # =============================================================================
+        # Compute an order of the AIG nodes
+        # =============================================================================
+        orderAIGNodes = []
+        def recurseOrder(node,orderAIGNodes):
+            if node in orderAIGNodes:
+                return
+            if not node in aigDefinitions.keys():
+                return # Global input
+            for precondition in aigDefinitions[node][0]:
+                recurseOrder(precondition,orderAIGNodes)
+            assert not node in orderAIGNodes
+            orderAIGNodes.append(node)
+        for (a,b) in aigDefinitions.items():
+            recurseOrder(a,orderAIGNodes)
 
 
         # =============================================================================
@@ -937,6 +994,12 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
                         # Input signal - has to come from here.
                         formula.append([-1 * varsLUTSignalDefinition[lut][aigNodeName], varsLUTInputSelection[lut][insig]])
                         
+
+        # Optimization/Symmetry Breaking: The first LUT in the order needs to be done by the first LUT, the last one
+        # in the order by the last LUT
+        # ----> Performance gets much worse with this change!
+        # formula.append([varsLUTSignalDefinition[0][orderAIGNodes[0]]])
+        # formula.append([varsLUTSignalDefinition[nofLUTs-1][orderAIGNodes[-1]]])
 
         # Encode: at most nofInputsPerLUT selected per level
         vpool = IDPool(start_from=nofVarsSoFar+1)
@@ -1139,6 +1202,7 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
 
 
         # Declare variables in Monitor code
+        print("#ifndef NO_MONITORING", file=outFile)
         print("#include \"UVWMonitor.h\"", file=outFile)
         print("#include <stdbool.h>", file=outFile)
         print("/* Declare variables for monitoring */", file=outFile)
@@ -1355,7 +1419,7 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
                             print("    }", file=outFile)
 
                 if stateNum==0:
-                    print("    logViolationExplanation(0,&(buf.b0p0)," + str(bufferSizesInWords[0] * 4) + ");", file=outFile)
+                    print("    logViolationExplanation(&(buf.b0p0)," + str(bufferSizesInWords[0] * 4) + ");", file=outFile)
 
                 print("  }", file=outFile,end="")
             print("", file=outFile)
@@ -1366,6 +1430,7 @@ def generateMonitorCodeAIGBased(dfa,baseUVW,propositions,livenessMonitoring,outF
             print("  uvwState"+str(i) + " = "+ locations["uvwState"+str(i)+"Next"]+";", file=outFile)
         print("")
         print("}\n", file=outFile)
+        print("#endif", file=outFile)
 
         # Add decoding information for the buffers:
         print("/* Decoding information for the buffers:", file=outFile)

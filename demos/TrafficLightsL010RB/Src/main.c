@@ -61,12 +61,17 @@ void SystemClock_Config(void);
 void fatal_error(); // Declaration only
 
 /** Monitoring **/
+#ifndef NO_MONITORING
 uint32_t currentAPValues = 0; // Atomic propositions for monitoring;
 // Bits 0-1: First traffic light
 // Bits 2-3: Second traffic light
 // Bits 4-5: Third traffic light
 // Bits 6-7: Fourth traffic light
 // Bits   8: Button A
+#endif
+
+
+  
 
 void currentAPsTOUART(uint32_t currentAPs) {
   /*
@@ -80,49 +85,62 @@ void currentAPsTOUART(uint32_t currentAPs) {
 
 }
 
-void logViolationExplanation(uint32_t dfaState,void *violationBuffer,uint32_t sizeBuffer) {
-  char text[256];
-  snprintf(text,256,"Violation in DFA state %d %d ",(int)dfaState,(int)sizeBuffer);
-  // Hex print
-  int pos = strlen(text);
-  for (uint32_t index=0;index<sizeBuffer;index++) {
-    text[pos] = "0123456789ABCDEF"[((uint8_t*)violationBuffer)[index]/16];
-    text[pos+1] = "0123456789ABCDEF"[((uint8_t*)violationBuffer)[index]%16];
-    pos+=2;
-    if (pos>250) fatal_error();
-  }
-  text[pos] = '\n';
-  text[pos+1] = 0;
-  HAL_UART_Transmit(&huart2,(uint8_t*)text,strlen(text),10000);
-  //while(1) {}; // Block.
+#ifndef NO_MONITORING
+void lockEEPROM() {
+  // From the reference manual
+  while ((FLASH->SR & FLASH_SR_BSY) != 0) {}
+  FLASH->PECR |= FLASH_PECR_PELOCK; /* (2) */
 }
 
-
-void logLivenessStarvation(uint32_t uvwState,uint32_t counter,void *violationBuffer,uint32_t sizeBuffer) {
-char text[256];
-  snprintf(text,256,"Logging starvation in UVW state %d for %d cycles ",(int)uvwState,(int)counter);
-  // Hex print
-  int pos = strlen(text);
-  for (uint32_t index=0;index<sizeBuffer;index++) {
-    text[pos] = "0123456789ABCDEF"[((uint8_t*)violationBuffer)[index]/16];
-    text[pos+1] = "0123456789ABCDEF"[((uint8_t*)violationBuffer)[index]%16];
-    pos+=2;
-    if (pos>250) fatal_error();
+void unlockEEPROM() {
+// Unlock EEPROM. Code taken from the reference manual
+  /* (1) Wait till no operation is on going */
+  /* (2) Check if the PELOCK is unlocked */
+  /* (3) Perform unlock sequence */
+  while ((FLASH->SR & FLASH_SR_BSY) != 0) /* (1) */
+  {
+  /* For robust implementation, add here time-out management */
   }
-  text[pos] = '\n';
-  text[pos+1] = 0;
-  HAL_UART_Transmit(&huart2,(uint8_t*)text,strlen(text),10000);
-
-
-
+  if ((FLASH->PECR & FLASH_PECR_PELOCK) != 0) /* (2) */
+  {
+  FLASH->PEKEYR = FLASH_PEKEY1; /* (3) */
+  FLASH->PEKEYR = FLASH_PEKEY2;
+  }
 }
 
+void logViolationExplanation(void *violationBuffer,uint32_t sizeBuffer) {
+  uint32_t *sizeStoredViolation = (uint32_t*)0x08080000;
+  uint8_t *storedViolation = (uint8_t*)0x08080004;
+  if (*sizeStoredViolation==0) {
+
+    unlockEEPROM();
+    *sizeStoredViolation = sizeBuffer;
+    for (uint i=0;i<sizeBuffer;i++) *(storedViolation+i) = *((uint8_t*)(violationBuffer)+i);
+    lockEEPROM();
+
+    char text[256];
+    snprintf(text,256,"Violation of size %d ",(int)sizeBuffer);
+    // Hex print
+    int pos = strlen(text);
+    for (uint32_t index=0;index<sizeBuffer;index++) {
+      text[pos] = "0123456789ABCDEF"[((uint8_t*)violationBuffer)[index]/16];
+      text[pos+1] = "0123456789ABCDEF"[((uint8_t*)violationBuffer)[index]%16];
+      pos+=2;
+      if (pos>250) fatal_error();
+    }
+    text[pos] = '\n';
+    text[pos+1] = 0;
+    HAL_UART_Transmit(&huart2,(uint8_t*)text,strlen(text),10000);
+    //while(1) {}; // Block.
+  }  
+}
+#endif
 
 // Counting cycles
 uint32_t cyclesHighValues = 0;
 uint32_t cyclesInMonitor = 0;
 
-
+#ifndef NO_MONITORING
 void updateButtonAPs() {
   if (GPIOA->IDR & 2) {
     currentAPValues &= ~256;
@@ -131,6 +149,7 @@ void updateButtonAPs() {
   }
   monitorUpdate(currentAPValues);
 }
+#endif
 
 void setLEDs(uint8_t val) {
 
@@ -234,8 +253,10 @@ void displayTL(uint8_t *modes) {
     
     // Sanity check, check APs
     if (modes[i]>=4) fatal_error();
+    #ifndef NO_MONITORING
     currentAPValues &= ~(3 << (2*i));
     currentAPValues |= modes[i] << (2*i);
+    #endif
     displayShiftOut(trafficSegMap[modes[i]]);
     displayShiftOut(segsel[i]);
     WRITE_PIN_DISP_CS(GPIO_PIN_SET);
@@ -245,13 +266,16 @@ void displayTL(uint8_t *modes) {
   if (*((uint32_t*)modes)!=lastModes) {
     lastModes = *((uint32_t*)modes);
     uint32_t timerOld = TIM2->CNT + cyclesHighValues;
+    #ifndef NO_MONITORING
     monitorUpdate(currentAPValues);
+    #endif
     uint32_t deltaT = TIM2->CNT + cyclesHighValues - timerOld;
     cyclesInMonitor += deltaT;
   }
+  }
 
-}
 
+const char *hexCodes = "0123456789ABCDEF";
 
 
 /* USER CODE END 0 */
@@ -287,7 +311,26 @@ int main(void)
   MX_TIM2_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-  HAL_UART_Transmit(&huart2,(uint8_t*)"\nBegin execution.\n",18,10000);
+  HAL_UART_Transmit(&huart2,(uint8_t*)"\nBegin execution. EEPROM content:\n",34,10000);
+
+
+ 
+  #ifndef NO_MONITORING
+  // Print out current EEPROM content
+  {
+    char d[1026];
+    for (unsigned int i=0;i<512;i++) {
+      uint8_t data = *((uint8_t*)(0x08080000 + i));
+      d[i*2] = hexCodes[data / 16];
+      d[i*2+1] = hexCodes[data % 16];
+    }
+    d[1024] = '\n';
+    d[1025] = 0;
+    HAL_UART_Transmit(&huart2,(uint8_t*)d,1025,10000);
+  }
+  #endif 
+
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -314,7 +357,9 @@ int main(void)
       displayTL(modes);
 
       // Button for emergency van
+      #ifndef NO_MONITORING
       updateButtonAPs();
+      #endif
       if (!(GPIOA->IDR & 2)) {
         if (currentMode<10) {
           currentMode = 10;
@@ -322,7 +367,18 @@ int main(void)
         }
       }
 
-
+      #ifndef NO_MONITORING
+        // Button for EEPROM reset
+       if (!(GPIOA->IDR & 16)) {
+         uint32_t *sizeStoredViolation = (uint32_t*)0x08080000;
+         if (*sizeStoredViolation>0) {
+          unlockEEPROM();
+          *sizeStoredViolation = 0;
+          lockEEPROM();
+          HAL_UART_Transmit(&huart2,(uint8_t*)"Resetting failure mem.\n         ",32,10000);
+         }
+      }
+      #endif
     }
 
 
@@ -416,7 +472,9 @@ int main(void)
         if ((GPIOA->IDR & 2)) {
           currentMode = 0;
         }
+        #ifndef NO_MONITORING
         updateButtonAPs();
+        #endif
         nextDelay = 1000;
         break;
 

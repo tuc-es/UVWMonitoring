@@ -136,18 +136,29 @@ def extractFlashAndMemUsageFromPlatformIORun(output):
             assert flash is None
             flash = int(parts[parts.index("(used")+1])
     return (flash,ram)
-
-# Experiment B1: No monitoring code
+    
+    
+# Experiment B0: No monitoring code
 with open("../demos/TrafficLightsL010RB/Src/monitor.c","w") as outFile:
     outFile.write("#include <stdint.h>\nvoid monitorUpdate(uint32_t d) {}\n")
     
-exp = runner.run("../demos/TrafficLightsL010RB","pio run -t clean;pio run")
+exp = runner.run("../demos/TrafficLightsL010RB","export PLATFORMIO_BUILD_FLAGS=\"-DNO_MONITORING\";run -t clean;pio run")
 (flash,ram) = extractFlashAndMemUsageFromPlatformIORun(exp.output)
 runner.log(\
     "Number of Flash Bytes No Monitoring Code Traffic Light",
     flash)
 runner.log(\
     "Number of RAM Bytes No Monitoring Code Traffic Light",
+    ram)    
+
+# Experiment B1: Empty Monitor
+exp = runner.run("../demos/TrafficLightsL010RB","pio run -t clean;pio run")
+(flash,ram) = extractFlashAndMemUsageFromPlatformIORun(exp.output)
+runner.log(\
+    "Number of Flash Bytes Empty Monitor Traffic Light",
+    flash)
+runner.log(\
+    "Number of RAM Bytes No Empty Monitor Traffic Light",
     ram)    
 
 # Experiment B2: Plain monitor    
