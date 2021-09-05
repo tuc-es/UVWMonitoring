@@ -136,11 +136,38 @@ def extractFlashAndMemUsageFromPlatformIORun(output):
             assert flash is None
             flash = int(parts[parts.index("(used")+1])
     return (flash,ram)
-    
+
+# Experiment B-1: Lines of Code main.c
+exp = runner.run(".","cloc ../demos/TrafficLightsL010RB/Src/main.c")
+for a in exp.output:
+    if a.startswith("C "):
+        codeLines = int(a.split(" ")[-1])
+runner.log(\
+    "LOC Traffic Light Main File",
+    codeLines)
+del codeLines
+exp = runner.run(".","cp ../demos/TrafficLightsL010RB/Src/mainOnlySTM32CubeCode.old /tmp/main.c; cloc /tmp/main.c")
+for a in exp.output:
+    if a.startswith("C "):
+        codeLines = int(a.split(" ")[-1])
+runner.log(\
+    "LOC STM32CUBE Code Traffic Light Main File",
+    codeLines)
     
 # Experiment B0: No monitoring code
+
 with open("../demos/TrafficLightsL010RB/Src/monitor.c","w") as outFile:
-    outFile.write("#include <stdint.h>\nvoid monitorUpdate(uint32_t d) {}\n")
+    outFile.write("""#include <stdint.h>\nvoid monitorUpdate(uint32_t d) {
+    if (d==0xFFFFFFFF) logViolationExplanation(0,0,0);
+    }\n""")
+
+     
+raise 3
+
+with open("../demos/TrafficLightsL010RB/Src/monitor.c","w") as outFile:
+    outFile.write("""#include <stdint.h>\nvoid monitorUpdate(uint32_t d) {
+    if (d==0xFFFFFFFF) logViolationExplanation(0,0,0);
+    }\n""")
     
 exp = runner.run("../demos/TrafficLightsL010RB","export PLATFORMIO_BUILD_FLAGS=\"-DNO_MONITORING\";run -t clean;pio run")
 (flash,ram) = extractFlashAndMemUsageFromPlatformIORun(exp.output)
@@ -158,7 +185,7 @@ runner.log(\
     "Number of Flash Bytes Empty Monitor Traffic Light",
     flash)
 runner.log(\
-    "Number of RAM Bytes No Empty Monitor Traffic Light",
+    "Number of RAM Bytes Empty Monitor Traffic Light",
     ram)    
 
 # Experiment B2: Plain monitor    
