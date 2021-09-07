@@ -66,7 +66,8 @@ class Runner:
     def log(self,loggingID,loggedValue,beautify_condition = lambda x: False, beautify_replacement = None, regular_formatter = lambda x:x):
         if beautify_condition(loggedValue):
             loggedValue = beautify_replacement
-        loggedValue = regular_formatter(loggedValue)
+        else:
+            loggedValue = regular_formatter(loggedValue)
         loggedValuePrinted = str(loggedValue).replace("\n"," / ")
         if len(loggedValuePrinted)>30:
             loggedValuePrinted = loggedValuePrinted[0:27]+"..."
