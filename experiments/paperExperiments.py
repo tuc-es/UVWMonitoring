@@ -295,25 +295,30 @@ runner.log(\
     "Number of RAM Bytes Plain Monitor Traffic Light",
     ram)    
 
+shutil.copy("../demos/TrafficLightsL010RB/Src/monitor.c","monitors/plain.c")
+
+
 # Experiment B3: Optimizing Monitors / Cases that work
-for repetition in range(NOF_REPETITIONS):
+for (nofLUTs,nofInputs) in [(7,8),(15,5),(11,6),(9,7)]:
     flashSizes = []
     times = []
-    for (nofLUTs,nofInputs) in [(7,8),(15,5),(11,6),(9,7)]:
+    rams = []
+    for repetition in range(NOF_REPETITIONS):
         exp = runner.run("../src/monitorcompiler","./monitorcompiler.py ../../examples/specTrafficLightBigger.txt --aigBased --nofLUTs "+str(nofLUTs)+" --nofInputsPerLUT "+str(nofInputs)+" --outFile ../../demos/TrafficLightsL010RB/Src/monitor.c")
+        times.append(exp.cpuTime)
     
         exp = runner.run("../demos/TrafficLightsL010RB","export PLATFORMIO_BUILD_FLAGS=\"\";pio run -t clean;pio run")
         (flash,ram) = extractFlashAndMemUsageFromPlatformIORun(exp.output)
         
         shutil.copy("../demos/TrafficLightsL010RB/Src/monitor.c","monitors/"+str(nofLUTs)+"_"+str(nofInputs)+"_copy"+str(repetition)+".c")
 
-        runner.log(\
-            "Number of RAM Bytes Optimizing Monitor Compiler "+str(nofLUTs)+" LUTS " + str(nofInputs)+" Inputs Traffic Light",
-            ram)    
-
         flashSizes.append(flash)
-        times.append(exp.cpuTime)
-            
+        rams.append(ram)
+
+    assert len(set(rams))==1 # It's always the same...
+    runner.log(\
+            "Number of RAM Bytes Optimizing Monitor Compiler "+str(nofLUTs)+" LUTS " + str(nofInputs)+" Inputs Traffic Light",
+            rams[0])                
 
     runner.log(\
         "Computation Time Optimizing Monitor Compiler "+str(nofLUTs)+" LUTS " + str(nofInputs)+" Inputs Traffic Light",

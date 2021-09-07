@@ -349,6 +349,7 @@ int main(void)
   int currentMode = 0;
   int nextDelay = 1000;
   uint32_t lastTick = HAL_GetTick();
+  int nofTimingInfosSoFar = 0;
 
   while (1)
   {
@@ -385,7 +386,8 @@ int main(void)
     // New timing info...
     {
       char text[256];
-      snprintf(text,256,"Timing info: %d %d\n",(int)(cyclesHighValues+TIM2->CNT),(int)cyclesInMonitor);
+      nofTimingInfosSoFar++;
+      snprintf(text,256,"TIMINFO: %d %d %d\n",nofTimingInfosSoFar,(int)(cyclesHighValues+TIM2->CNT),(int)cyclesInMonitor);
       HAL_UART_Transmit(&huart2,(uint8_t*)text,strlen(text),10000);
     }
 
