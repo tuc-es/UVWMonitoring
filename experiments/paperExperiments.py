@@ -258,7 +258,7 @@ with open("../demos/TrafficLightsL010RB/Src/monitor.c","w") as outFile:
     if (d==0xFFFFFFFF) logViolationExplanation(0,0,0);
     }\n""")
     
-exp = runner.run("../demos/TrafficLightsL010RB","export PLATFORMIO_BUILD_FLAGS=\"-DNO_MONITORING\";run -t clean;pio run")
+exp = runner.run("../demos/TrafficLightsL010RB","export PLATFORMIO_BUILD_FLAGS=\"-DNO_MONITORING\";pio run -t clean;pio run")
 (flash,ram) = extractFlashAndMemUsageFromPlatformIORun(exp.output)
 runner.log(\
     "Number of Flash Bytes No Monitoring Code Traffic Light",
