@@ -1,3 +1,6 @@
 [submodule "lib/Spot"]
 	path = lib/Spot
 	url = https://github.com/Meijuh/Spot
+[submodule "lib/kissat"]
+	path = lib/kissat
+	url = https://github.com/arminbiere/kissat
