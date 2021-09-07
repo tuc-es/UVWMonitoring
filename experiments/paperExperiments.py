@@ -13,9 +13,11 @@
 # putation times <0.1 seconds can be replaced by the string "<0.1 
 # seconds".
 # ===================================================================
-import experiment_runner
+import experiment_runner, shutil
 
 runner = experiment_runner.Runner()
+
+NOF_REPETITIONS = 2
 
 # ===================================================================
 # Experiment 1: Extracting all simple chains of a simple LTL property
@@ -113,11 +115,100 @@ runner.log(\
 
 runner.log(\
     "All Chains Full LTL Property From Case Study Formatted",
-    chains)
-    
-    
-    
-    
+    chains,
+    beautify_condition = lambda x: x==['~(~a1|a2) R (((~a1&m)|(a2&m)) -> X (false))', '~(~a1|a2) R ((a1&~a2&m) -> X (~(~a2|a1) R (((~a2&~m)|(a1&~m)|(a1&~a2)) -> X (false))))', '~(~a2|a1) R (((~a1&~a2&m)|(a1&a2&m)) -> X (false))', '~(~a2|a1) R ((a1&~a2&m) -> X (~(~a2|a1) R (((~a2&~m)|(a1&~m)|(a1&~a2)) -> X (false))))'],
+    beautify_replacement = """\\begin{tikzpicture}
+\\node[draw,state,inner sep=0pt,minimum size=0.7cm,thick] (q0) at (-1,0) {$q_1$};
+
+\\node[accepting,draw,state,inner sep=0pt,minimum size=0.7cm,thick] (q2) at (2,0) {$q_0$};
+
+% Initial
+\\draw[fill=black] (-1.75,0.4) circle (0.06cm);
+\\draw[thick,->] (-1.75,0.4) -- (q0);
+\\draw[thick] (q0) edge[loop above] node[above] {$\\neg a_1 \\vee a_2$} (q0);
+
+% \\\\draw[thick] (q1) edge[loop above] node[above] {$a \\wedge \\\\neg b$} (q1);
+
+\\draw[thick] (q2) edge[loop above] node[above] {$\\TRUE$} (q2);
+
+\\draw[thick,->] (q0) edge node[above] {$m \\wedge (\\neg a_1 \\vee a_2)$} (q2);
+
+
+% Chain three
+
+\\node[draw,state,inner sep=0pt,minimum size=0.7cm,thick] (q0) at (5,0) {$q_2$};
+
+\\node[accepting,draw,state,inner sep=0pt,minimum size=0.7cm,thick] (q2) at (8,0) {$q_0$};
+
+\\draw[fill=black] (4.25,0.4) circle (0.06cm);
+\\draw[thick,->] (4.25,0.4) -- (q0);
+
+\\draw[thick] (q0) edge[loop above] node[above] {$\\neg a_2 \\vee a_1$} (q0);
+\\draw[thick] (q2) edge[loop above] node[above] {$\\TRUE$} (q2);
+
+\\draw[thick,->] (q0) edge node[above] {$m \\wedge (a_1 \\equiv a_2)$} (q2);
+
+
+% Chain two
+\\node[draw,state,inner sep=0pt,minimum size=0.7cm,thick] (q0) at (-1,-2) {$q_3$};
+
+\\node[draw,state,inner sep=0pt,minimum size=0.7cm,thick] (q1) at (2,-2) {$q_4$};
+
+\\node[accepting,draw,state,inner sep=0pt,minimum size=0.7cm,thick] (q2) at (7,-2) {$q_0$};
+
+
+
+\\draw[thick,->] (q0) edge[loop above] node[above] {$\\neg a_1 \\vee a_2$} (q0);
+
+\\draw[thick,->] (q1) edge[loop above] node[above] {$\\neg a_2 \\vee a_1$} (q1);
+
+\\draw[thick,->] (q2) edge[loop above] node[above] {$\\TRUE$} (q2);
+
+\\draw[thick,->] (q0) edge node[above] {$a_1 \\wedge \\neg a_2 \\wedge m$} (q1);
+
+\\draw[thick,->] (q1) edge node[above] {$(\\neg m \\wedge (\\neg a_2 \\vee a_1)) \\vee (a_1 \\wedge \\neg a_2)$} (q2);
+
+\\draw[fill=black] (-1.75,-1.6) circle (0.06cm);
+\\draw[thick,->] (-1.75,-1.6) -- (q0);
+
+
+
+% Chain four
+\\node[draw,state,inner sep=0pt,minimum size=0.7cm,thick] (q0) at (-1,-4) {$q_5$};
+
+\\node[draw,state,inner sep=0pt,minimum size=0.7cm,thick] (q1) at (2,-4) {$q_6$};
+
+\\node[accepting,draw,state,inner sep=0pt,minimum size=0.7cm,thick] (q2) at (7,-4) {$q_0$};
+
+
+
+\\draw[thick,->] (q0) edge[loop above] node[above] {$\\neg a_2 \\vee a_1$} (q0);
+
+\\draw[thick,->] (q1) edge[loop above] node[above] {$\\neg a_2 \\vee a_1$} (q1);
+
+\\draw[thick,->] (q2) edge[loop above] node[above] {$\\TRUE$} (q2);
+
+\\draw[thick,->] (q0) edge node[above] {$a_1 \\wedge \\neg a_2 \\wedge m$} (q1);
+
+\\draw[thick,->] (q1) edge node[above] {$(\\neg m \\wedge (\\neg a_2 \\vee a_1)) \\vee (a_1 \\wedge \\neg a_2)$} (q2);
+
+\\draw[fill=black] (-1.75,-3.6) circle (0.06cm);
+\\draw[thick,->] (-1.75,-3.6) -- (q0);
+
+
+\\end{tikzpicture}
+""")
+
+# ===================================================================
+# Experiment C: Monitor code compilation
+# ===================================================================
+cpuTimes = []
+for repetition in range(NOF_REPETITIONS):
+    exp = runner.run(".","../lib/kissat/build/kissat aigbased_8_7.cnf; test $? -eq 20")
+    cpuTimes.append(exp.cpuTime)
+runner.log(\
+    "Computation Times Kissat AIG Based 8 7",runner.formatMeanStdDev(cpuTimes))
+
 
 # ===================================================================
 # Experiment B: Monitor code compilation
@@ -162,8 +253,6 @@ with open("../demos/TrafficLightsL010RB/Src/monitor.c","w") as outFile:
     }\n""")
 
      
-raise 3
-
 with open("../demos/TrafficLightsL010RB/Src/monitor.c","w") as outFile:
     outFile.write("""#include <stdint.h>\nvoid monitorUpdate(uint32_t d) {
     if (d==0xFFFFFFFF) logViolationExplanation(0,0,0);
@@ -179,7 +268,7 @@ runner.log(\
     ram)    
 
 # Experiment B1: Empty Monitor
-exp = runner.run("../demos/TrafficLightsL010RB","pio run -t clean;pio run")
+exp = runner.run("../demos/TrafficLightsL010RB","export PLATFORMIO_BUILD_FLAGS=\"\";pio run -t clean;pio run")
 (flash,ram) = extractFlashAndMemUsageFromPlatformIORun(exp.output)
 runner.log(\
     "Number of Flash Bytes Empty Monitor Traffic Light",
@@ -197,7 +286,7 @@ runner.log(\
     beautify_replacement = "$<$ 0.01 seconds",
     regular_formatter = lambda x: "%1.3f" % x)
 
-exp = runner.run("../demos/TrafficLightsL010RB","pio run -t clean;pio run")
+exp = runner.run("../demos/TrafficLightsL010RB","export PLATFORMIO_BUILD_FLAGS=\"\";pio run -t clean;pio run")
 (flash,ram) = extractFlashAndMemUsageFromPlatformIORun(exp.output)
 runner.log(\
     "Number of Flash Bytes Plain Monitor Traffic Light",
@@ -207,22 +296,32 @@ runner.log(\
     ram)    
 
 # Experiment B3: Optimizing Monitors / Cases that work
-for (nofLUTs,nofInputs) in [(7,8),(15,5),(11,6),(9,7)]:
-    exp = runner.run("../src/monitorcompiler","./monitorcompiler.py ../../examples/specTrafficLightBigger.txt --aigBased --nofLUTs "+str(nofLUTs)+" --nofInputsPerLUT "+str(nofInputs)+" --outFile ../../demos/TrafficLightsL010RB/Src/monitor.c")
+for repetition in range(NOF_REPETITIONS):
+    flashSizes = []
+    times = []
+    for (nofLUTs,nofInputs) in [(7,8),(15,5),(11,6),(9,7)]:
+        exp = runner.run("../src/monitorcompiler","./monitorcompiler.py ../../examples/specTrafficLightBigger.txt --aigBased --nofLUTs "+str(nofLUTs)+" --nofInputsPerLUT "+str(nofInputs)+" --outFile ../../demos/TrafficLightsL010RB/Src/monitor.c")
+    
+        exp = runner.run("../demos/TrafficLightsL010RB","export PLATFORMIO_BUILD_FLAGS=\"\";pio run -t clean;pio run")
+        (flash,ram) = extractFlashAndMemUsageFromPlatformIORun(exp.output)
+        
+        shutil.copy("../demos/TrafficLightsL010RB/Src/monitor.c","monitors/"+str(nofLUTs)+"_"+str(nofInputs)+"_copy"+str(repetition)+".c")
+
+        runner.log(\
+            "Number of RAM Bytes Optimizing Monitor Compiler "+str(nofLUTs)+" LUTS " + str(nofInputs)+" Inputs Traffic Light",
+            ram)    
+
+        flashSizes.append(flash)
+        times.append(exp.cpuTime)
+            
+
     runner.log(\
         "Computation Time Optimizing Monitor Compiler "+str(nofLUTs)+" LUTS " + str(nofInputs)+" Inputs Traffic Light",
-        exp.cpuTime,
-        beautify_condition = lambda x: x<0.01,
-        beautify_replacement = "$<$ 0.01 seconds",
-        regular_formatter = lambda x: "%1.3f" % x)
+        runner.formatMeanStdDev(times),
+        )
 
-    exp = runner.run("../demos/TrafficLightsL010RB","pio run -t clean;pio run")
-    (flash,ram) = extractFlashAndMemUsageFromPlatformIORun(exp.output)
     runner.log(\
         "Number of Flash Bytes Optimizing Monitor Compiler "+str(nofLUTs)+" LUTS " + str(nofInputs)+" Inputs Traffic Light",
-        flash)
-    runner.log(\
-        "Number of RAM Bytes Optimizing Monitor Compiler "+str(nofLUTs)+" LUTS " + str(nofInputs)+" Inputs Traffic Light",
-        ram)    
+        runner.formatMeanStdDev(flashSizes,formatString = "%04.2f $\pm$ %04.2f"))
 
 

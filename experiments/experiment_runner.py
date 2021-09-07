@@ -4,8 +4,8 @@
 # Functions for running experiments using a self-explatory
 # experiment logbook.
 #===============================================================
-import subprocess, os
-import selectors, sys, psutil, time, resource
+import subprocess, os, math
+import selectors, sys, psutil, time, resource, numpy
 
 # Source: https://stackoverflow.com/questions/26475636/measure-elapsed-time-amount-of-memory-and-cpu-used-by-the-extern-program
 
@@ -46,6 +46,11 @@ class Runner:
         self.overallCPUTime = 0.0
         self.filesWritten = []
         self.resultsSubPath = "results/"
+        
+    def formatMeanStdDev(self,data,formatString = "%04.2f $\pm$ %04.2f"):
+        mean = numpy.mean(data)
+        stddev = math.sqrt(numpy.var(data))
+        return formatString % (mean,stddev)
                 
     def expect_line_in_file(self,outputFile,linePrefix,lineSuffix):
         duplicate = False
