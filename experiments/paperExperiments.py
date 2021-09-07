@@ -17,7 +17,7 @@ import experiment_runner, shutil
 
 runner = experiment_runner.Runner()
 
-NOF_REPETITIONS = 2
+NOF_REPETITIONS = 10
 
 # ===================================================================
 # Experiment 1: Extracting all simple chains of a simple LTL property
