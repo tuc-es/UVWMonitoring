@@ -32,7 +32,7 @@ runner.log(\
     regular_formatter = lambda x: "%1.3f" % x)
 
 # 1b: Expected Number of states is 4
-runner.expect_line_in_file("../src/ChainExtractor/paperExampleTrafficLight.hoa","States:","4")
+runner.expect_line_in_file("../src/ChainExtractor/paperExampleSimpleFullLTLProperty.hoa","States:","4")
 runner.log(\
     "Number of States Parity Automaton Simple Full LTL Property",
     4)
