@@ -28,6 +28,7 @@
 #include "UVWMonitor.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdbool.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -117,22 +118,24 @@ void logViolationExplanation(void *violationBuffer,uint32_t sizeBuffer) {
     *sizeStoredViolation = sizeBuffer;
     for (uint i=0;i<sizeBuffer;i++) *(storedViolation+i) = *((uint8_t*)(violationBuffer)+i);
     lockEEPROM();
+  }
 
-    char text[256];
-    snprintf(text,256,"Violation of size %d ",(int)sizeBuffer);
-    // Hex print
-    int pos = strlen(text);
-    for (uint32_t index=0;index<sizeBuffer;index++) {
-      text[pos] = "0123456789ABCDEF"[((uint8_t*)violationBuffer)[index]/16];
-      text[pos+1] = "0123456789ABCDEF"[((uint8_t*)violationBuffer)[index]%16];
-      pos+=2;
-      if (pos>250) fatal_error();
-    }
-    text[pos] = '\n';
-    text[pos+1] = 0;
-    HAL_UART_Transmit(&huart2,(uint8_t*)text,strlen(text),10000);
-    //while(1) {}; // Block.
-  }  
+  char text[256];
+  snprintf(text,256,"Violation of size %d ",(int)sizeBuffer);
+  // Hex print
+  int pos = strlen(text);
+  for (uint32_t index=0;index<sizeBuffer;index++) {
+    text[pos] = "0123456789ABCDEF"[((uint8_t*)violationBuffer)[index]/16];
+    text[pos+1] = "0123456789ABCDEF"[((uint8_t*)violationBuffer)[index]%16];
+    pos+=2;
+    if (pos>250) fatal_error();
+  }
+  text[pos] = '\n';
+  text[pos+1] = 0;
+  HAL_UART_Transmit(&huart2,(uint8_t*)text,strlen(text),10000);
+  while(1) {
+    volatile int k = pos++;
+  }; // Block.
 }
 #endif
 
@@ -140,16 +143,21 @@ void logViolationExplanation(void *violationBuffer,uint32_t sizeBuffer) {
 uint32_t cyclesHighValues = 0;
 uint32_t cyclesInMonitor = 0;
 
-#ifndef NO_MONITORING
-void updateButtonAPs() {
-  if (GPIOA->IDR & 2) {
-    currentAPValues &= ~256;
-  } else {
+bool updateButtonAPs() {
+  bool val = (GPIOA->IDR & 2)==0;
+  #ifndef NO_MONITORING
+  uint32_t old = currentAPValues;
+  if (val) {
     currentAPValues |= 256;
+  } else {
+    currentAPValues &= ~256;
   }
-  monitorUpdate(currentAPValues);
+  if (old!=currentAPValues)
+    monitorUpdate(currentAPValues);
+  #endif
+  return val;
 }
-#endif
+
 
 void setLEDs(uint8_t val) {
 
@@ -358,10 +366,7 @@ int main(void)
       displayTL(modes);
 
       // Button for emergency van
-      #ifndef NO_MONITORING
-      updateButtonAPs();
-      #endif
-      if (!(GPIOA->IDR & 2)) {
+      if (updateButtonAPs()) {
         if (currentMode<10) {
           currentMode = 10;
           nextDelay = 500; // Faster backup
@@ -471,12 +476,9 @@ int main(void)
         nextDelay = 1000;
         break;
       case 14:
-        if ((GPIOA->IDR & 2)) {
+        if (!updateButtonAPs()) {
           currentMode = 0;
         }
-        #ifndef NO_MONITORING
-        updateButtonAPs();
-        #endif
         nextDelay = 1000;
         break;
 

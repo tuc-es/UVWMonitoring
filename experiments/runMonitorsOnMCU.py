@@ -36,7 +36,7 @@ for monitorFile in glob.glob("monitors/*.c"):
     conn.read(1000000000)
     conn.timeout = None
     while True:
-        line = conn.readline().decode("utf-8")
+        line = conn.readline().decode("cp1252")
         print(line)
         if line.startswith("TIMINFO: "+str(NOF_TIMING_INFO_TO_WATCH)+" "):
             line = line.strip().split(" ")
@@ -71,5 +71,19 @@ for (nofLUTs,nofInputsPerLUT),data in computationTimes.items():
     else:
         filename = "MonitorExecutionTimePercentage "+str(nofLUTs)+" LUTS " + str(nofInputsPerLUT)+" Inputs Traffic Light"
     runner.log(filename,runner.formatMeanStdDev(percentageMonitor,"%1.6f\,\\%% $\pm$ %1.6f\,\\%%"),
+    )
+    
+    if nofLUTs==0:
+        filename = "MonitorExecutionTime Min Plain Traffic Light"
+    else:
+        filename = "MonitorExecutionTime Min "+str(nofLUTs)+" LUTS " + str(nofInputsPerLUT)+" Inputs Traffic Light"
+    runner.log(filename,min(allCyclesMonitor),
+    )
+    
+    if nofLUTs==0:
+        filename = "MonitorExecutionTime Max Plain Traffic Light"
+    else:
+        filename = "MonitorExecutionTime Max "+str(nofLUTs)+" LUTS " + str(nofInputsPerLUT)+" Inputs Traffic Light"
+    runner.log(filename,max(allCyclesMonitor),
     )
     
