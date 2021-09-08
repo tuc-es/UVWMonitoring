@@ -6,15 +6,7 @@ APs: a1 a2 b1 b2 c1 c2 d1 d2 m
 # Green: (!a1 & a2)
 # Yellow: (a1 & a2)
 
-# Everyone eventually gets green
-G F (a2 & !a1)
-G F (b2 & !b1)
-G F (c2 & !c1)
-G F (d2 & !d1)
-
-
 # After Red, Orange is next, followed by green
-# TODO
 G ( (!a1 & !a2) -> ((!a1 & a2) R ( ((a1 & !a2) & ((!a1 & a2) R ((a1 & !a2) | (!a1 & a2))))  | (!a1 & !a2) | (!a1 & a2))))
 
 G ( (!b1 & !b2) -> ((!b1 & b2) R ( ((b1 & !b2) & ((!b1 & b2) R ((b1 & !b2) | (!b1 & b2))))  | (!b1 & !b2) | (!b1 & b2))))
@@ -25,7 +17,6 @@ G ( (!d1 & !d2) -> ((!d1 & d2) R ( ((d1 & !d2) & ((!d1 & d2) R ((d1 & !d2) | (!d
 
 
 # From Green, we can only switch to yellow, to red. (No G->Y->G)
-# TODO
 G ( (!a1 & a2) -> ((!a1 & !a2) R ( ((a1 & a2) & ((!a1 & !a2) R ((a1 & a2) | (!a1 & !a2))))  | (!a1 & a2) | (!a1 & !a2))))
 
 G ( (!b1 & b2) -> ((!b1 & !b2) R ( ((b1 & b2) & ((!b1 & !b2) R ((b1 & b2) | (!b1 & !b2))))  | (!b1 & b2) | (!b1 & !b2))))
