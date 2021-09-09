@@ -154,7 +154,7 @@ runner.log(\
 
 \\node[draw,state,inner sep=0pt,minimum size=0.7cm,thick] (q1) at (2,-2) {$q_4$};
 
-\\node[accepting,draw,state,inner sep=0pt,minimum size=0.7cm,thick] (q2) at (7,-2) {$q_0$};
+\\node[accepting,draw,state,inner sep=0pt,minimum size=0.7cm,thick] (q2) at (8,-2) {$q_0$};
 
 
 
@@ -178,7 +178,7 @@ runner.log(\
 
 \\node[draw,state,inner sep=0pt,minimum size=0.7cm,thick] (q1) at (2,-4) {$q_6$};
 
-\\node[accepting,draw,state,inner sep=0pt,minimum size=0.7cm,thick] (q2) at (7,-4) {$q_0$};
+\\node[accepting,draw,state,inner sep=0pt,minimum size=0.7cm,thick] (q2) at (8,-4) {$q_0$};
 
 
 

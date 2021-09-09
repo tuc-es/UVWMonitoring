@@ -134,7 +134,7 @@ void logViolationExplanation(void *violationBuffer,uint32_t sizeBuffer) {
   text[pos+1] = 0;
   HAL_UART_Transmit(&huart2,(uint8_t*)text,strlen(text),10000);
   while(1) {
-    volatile int k = pos++;
+    volatile int k = pos++; // So that a debugging breakpoint can be set here.
   }; // Block.
 }
 #endif
