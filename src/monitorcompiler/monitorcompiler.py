@@ -312,7 +312,7 @@ def pickCNFOrDNFWhateverIsShorter(cnfLabel,dnfLabel,outFile, varNames):
         if i > 0:
             textDNF += " || "
         if not False in case and not True in case:
-            textDNF += "0"
+            textDNF += "1"
         else:
             first = True
             textDNF += "("
@@ -468,8 +468,8 @@ def generateMonitorCodeNondeterministic(dfa,baseUVW,propositions,livenessMonitor
                 assert not condition == baseUVW.ddMgr.false 
                 assert not incoming == baseUVW.ddMgr.false
         assert not (stateNum==0 and incoming==baseUVW.ddMgr.false)
-        dnfLabel = bddToDNF(~incoming, baseUVW.ddMgr, careSet, bddVariables, allBDDVarNames)
-        cnfLabel = bddToDNF(incoming, baseUVW.ddMgr, careSet, bddVariables, allBDDVarNames)
+        dnfLabel = bddToDNF(incoming, baseUVW.ddMgr, careSet, bddVariables, allBDDVarNames)
+        cnfLabel = bddToDNF(~incoming, baseUVW.ddMgr, careSet, bddVariables, allBDDVarNames)
         pickCNFOrDNFWhateverIsShorter(cnfLabel, dnfLabel, outFile, allBDDVarNames)
         print(")) {", file = outFile)
         print("    nextUVW"+str(stateNum)+" = 1;",file=outFile)
